@@ -1,0 +1,36 @@
+{
+  "source": "OpenStreetMap contributors / Overpass API",
+  "license": "ODbL 1.0",
+  "attributionUrl": "https://www.openstreetmap.org/copyright",
+  "exportedAt": "2026-11-09T18:36:57.375Z",
+  "osmTimestamp": "2026-11-09T18:34:50Z",
+  "bbox": [
+    45.72,
+    21.18,
+    45.79,
+    21.28
+  ],
+  "counts": {
+    "cycleways": 143,
+    "tramways": 218,
+    "sidewalks": 3063,
+    "places": 4227
+  },
+  "notes": "Road-tag cycleways and sidewalks use street centerlines, not surveyed separate paths. Coverage is incomplete. Parks/sport/museum points may be polygon centers; not entrance coordinates.",
+  "placesExportedAt": "2026-11-09T19:27:10.827Z",
+  "placesOsmTimestamp": "2026-11-09T19:24:34Z",
+  "placeCategories": {
+    "tram_stop": 157,
+    "sport": 35,
+    "museum": 18,
+    "shop": 1106,
+    "services": 761,
+    "transport": 112,
+    "food": 534,
+    "health": 290,
+    "culture": 280,
+    "education": 153,
+    "building": 725,
+    "park": 56
+  }
+}

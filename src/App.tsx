@@ -2747,7 +2747,6 @@ export default function App({
                   <div className="pin-list" role="region" aria-label="Evenimente și Postări Comunitate">
                     {/* Official Municipal & Cultural Events Geolocated on the Map */}
                     {visibleCityEvents.map(ev => {
-                      const isSelected = selectedCityEvent?.id === ev.id;
                       const isEventSaved = savedEventIds.includes(ev.id);
                       const linkedDiscussion = findDiscussionForCityEvent(ev);
                       const linkedMsgCount = linkedDiscussion
@@ -2760,7 +2759,7 @@ export default function App({
                       return (
                         <article
                           key={ev.id}
-                          className={`pin-card official-event-card ${isSelected ? 'is-selected' : ''}`}
+                          className="pin-card official-event-card"
                         >
                           <div className="card-actions">
                             <button

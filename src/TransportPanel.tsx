@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeftRight,
+  Bus,
   Compass,
   Eye,
-  Navigation,
   Radio,
   Route,
   Search,
@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import type { Point } from './domain';
+import type { NetworkSubFilters } from './mobility-map';
 import type { FeedState, LiveVehicle, LiveVehicleType } from './stpt-live';
 import { stptLines } from './stpt-live';
 import type { LineSummary, TransitStop } from './transitRouter';
@@ -26,10 +27,12 @@ type Props = {
   selectedLine: string;
   selectedDirection: 'tur' | 'retur';
   showAllRoutes: boolean;
+  networkSubFilters: NetworkSubFilters;
   onSelectVehicle: (vehicle: LiveVehicle) => void;
   onSelectLine: (line: string) => void;
   onChangeDirection: (dir: 'tur' | 'retur') => void;
   onToggleShowAllRoutes: (enabled: boolean) => void;
+  onChangeNetworkSubFilters: (next: NetworkSubFilters) => void;
   onPlanToStop: (stop: TransitStop) => void;
   onOpenRoutePlanner: () => void;
   userLocation?: Point;
@@ -42,10 +45,12 @@ export function TransportPanel({
   selectedLine,
   selectedDirection,
   showAllRoutes,
+  networkSubFilters,
   onSelectVehicle,
   onSelectLine,
   onChangeDirection,
   onToggleShowAllRoutes,
+  onChangeNetworkSubFilters,
   onPlanToStop,
   onOpenRoutePlanner,
 }: Props) {
@@ -69,7 +74,11 @@ export function TransportPanel({
     const q = searchQuery.trim().toLocaleLowerCase('ro');
     return feed.vehicles.filter(v => {
       if (modeFilter !== 'all' && v.type !== modeFilter) return false;
-      if (selectedLine && !showAllRoutes) {
+      if (showAllRoutes) {
+        if (v.type === 'tram' && !networkSubFilters.tram) return false;
+        if (v.type === 'trolleybus' && !networkSubFilters.trolleybus) return false;
+        if (v.type === 'bus' && !networkSubFilters.bus) return false;
+      } else if (selectedLine) {
         if (v.line.toUpperCase() !== selectedLine.toUpperCase()) return false;
         if (v.directionId) {
           const expectedDir = selectedDirection === 'tur' ? '0' : '1';
@@ -82,7 +91,7 @@ export function TransportPanel({
       }
       return true;
     });
-  }, [feed.vehicles, modeFilter, selectedLine, showAllRoutes, selectedDirection, searchQuery]);
+  }, [feed.vehicles, modeFilter, selectedLine, showAllRoutes, networkSubFilters, selectedDirection, searchQuery]);
 
   const lineVehicleCounts = useMemo(() => {
     const map = new Map<string, number>();
@@ -91,6 +100,18 @@ export function TransportPanel({
       map.set(k, (map.get(k) ?? 0) + 1);
     }
     return map;
+  }, [feed.vehicles]);
+
+  const modeCounts = useMemo(() => {
+    let tram = 0;
+    let trolleybus = 0;
+    let bus = 0;
+    for (const v of feed.vehicles) {
+      if (v.type === 'tram') tram++;
+      else if (v.type === 'trolleybus') trolleybus++;
+      else bus++;
+    }
+    return { tram, trolleybus, bus };
   }, [feed.vehicles]);
 
   const badgeColor = (type: LiveVehicleType, line: string) =>
@@ -128,7 +149,7 @@ export function TransportPanel({
           onClick={() => onToggleShowAllRoutes(!showAllRoutes)}
         >
           <Eye size={15} />
-          <span>Afișează toate liniile</span>
+          <span>Afișează Toate</span>
           <span className="switch" aria-hidden="true"><i /></span>
         </button>
         <button type="button" className="secondary compact-btn" onClick={onOpenRoutePlanner}>
@@ -136,6 +157,63 @@ export function TransportPanel({
           Rutare A→B
         </button>
       </div>
+
+      {/* Secondary Sub-filters when Show All is enabled: [Tramvaie], [Troleibuze], [Autobuze] */}
+      {showAllRoutes && (
+        <div className="network-subfilters-box" role="group" aria-label="Sub-filtre rețea pe tip de vehicul">
+          <div className="network-subfilters-header">
+            <strong>Sub-filtre rețea afișată pe hartă</strong>
+            <small>Selectează tipurile de trasee pentru a evita supraîncărcarea hărții</small>
+          </div>
+          <div className="network-subfilters-pills">
+            <button
+              type="button"
+              className={`subfilter-toggle-btn tram ${networkSubFilters.tram ? 'active' : ''}`}
+              aria-pressed={networkSubFilters.tram}
+              onClick={() =>
+                onChangeNetworkSubFilters({
+                  ...networkSubFilters,
+                  tram: !networkSubFilters.tram,
+                })
+              }
+            >
+              <TrainFront size={14} />
+              <span>Tramvaie</span>
+              <b className="subfilter-count">{modeCounts.tram}</b>
+            </button>
+            <button
+              type="button"
+              className={`subfilter-toggle-btn trolleybus ${networkSubFilters.trolleybus ? 'active' : ''}`}
+              aria-pressed={networkSubFilters.trolleybus}
+              onClick={() =>
+                onChangeNetworkSubFilters({
+                  ...networkSubFilters,
+                  trolleybus: !networkSubFilters.trolleybus,
+                })
+              }
+            >
+              <Bus size={14} />
+              <span>Troleibuze</span>
+              <b className="subfilter-count">{modeCounts.trolleybus}</b>
+            </button>
+            <button
+              type="button"
+              className={`subfilter-toggle-btn bus ${networkSubFilters.bus ? 'active' : ''}`}
+              aria-pressed={networkSubFilters.bus}
+              onClick={() =>
+                onChangeNetworkSubFilters({
+                  ...networkSubFilters,
+                  bus: !networkSubFilters.bus,
+                })
+              }
+            >
+              <Bus size={14} />
+              <span>Autobuze</span>
+              <b className="subfilter-count">{modeCounts.bus}</b>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tur / Retur Direction Selector when a line is selected */}
       {selectedLine && (
@@ -155,7 +233,7 @@ export function TransportPanel({
                   {activeLineSummary ? `${vehicleLabels[activeLineSummary.type]} ${selectedLine}` : `Linia ${selectedLine}`}
                 </strong>
                 <small>
-                  {showAllRoutes ? 'Rețea completă afișată' : 'Traseu izolat exclusiv pe hartă'}
+                  {showAllRoutes ? 'Rețea filtrată afișată' : 'Traseu izolat exclusiv pe hartă'}
                 </small>
               </div>
             </div>
@@ -374,7 +452,7 @@ export function TransportPanel({
           <div className="empty-state">
             <Radio size={26} />
             <h3>Niciun vehicul activ pe selecția curentă</h3>
-            <p>Încearcă să comuți între Tur și Retur sau activează „Afișează toate liniile”.</p>
+            <p>Încearcă să comuți între Tur și Retur sau ajustează sub-filtrele rețelei.</p>
           </div>
         )}
       </div>

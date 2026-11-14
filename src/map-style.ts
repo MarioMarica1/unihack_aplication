@@ -1,12 +1,18 @@
 import type { Map as MapLibreMap } from 'maplibre-gl';
+
+export type BaseMapStyle = 'buildings3d' | 'minimal' | 'satellite';
+
 type StyleMap = Pick<MapLibreMap, 'getStyle' | 'getLayer' | 'setLayoutProperty' | 'setPaintProperty' | 'setLayerZoomRange'>;
 export function isBasePlaceLayer(layer: ReturnType<StyleMap['getStyle']>['layers'][number]) {
   return layer.type === 'symbol' && ('source-layer' in layer && layer['source-layer'] === 'poi' || layer.id.startsWith('poi_'));
 }
 
-export function applyBaseStyle(map: StyleMap, options: { buildings: boolean; places: boolean; dark?: boolean }) {
+export function applyBaseStyle(
+  map: StyleMap,
+  options: { buildings: boolean; places: boolean; dark?: boolean; buildings3d?: boolean },
+) {
   for (const layer of map.getStyle().layers) {
-    if (/^(osm-|route-|mobility-|stpt-)/.test(layer.id)) continue;
+    if (/^(osm-|route-|mobility-|stpt-|satellite-)/.test(layer.id)) continue;
     if (options.dark) {
       const id = layer.id;
       if (layer.type === 'background') map.setPaintProperty(id, 'background-color', '#242f3e');
@@ -32,7 +38,8 @@ export function applyBaseStyle(map: StyleMap, options: { buildings: boolean; pla
       if (id === 'aeroway-area' && layer.type === 'fill') map.setPaintProperty(id, 'fill-color', '#38414e');
     }
     if (/building|housenumber/.test(layer.id) || ('source-layer' in layer && ['building', 'housenumber'].includes(layer['source-layer'] ?? ''))) {
-      map.setLayoutProperty(layer.id, 'visibility', options.buildings && layer.type !== 'fill-extrusion' ? 'visible' : 'none');
+      const showLayer = options.buildings && (layer.type !== 'fill-extrusion' || Boolean(options.buildings3d));
+      map.setLayoutProperty(layer.id, 'visibility', showLayer ? 'visible' : 'none');
       if (layer.type === 'fill') {
         // Liberty's building fill stops at z14; extending it is required when 3D is disabled.
         map.setLayerZoomRange(layer.id, 13, 24);

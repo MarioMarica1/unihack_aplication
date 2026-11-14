@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { meta } from './domain';
 import type { Pin, Point } from './domain';
 import { applyBaseStyle } from './map-style';
+import type { BaseMapStyle } from './map-style';
 import type { RouteResult } from './routing';
 import { layerDefinitions } from './infrastructure';
 import type { Infrastructure, LayerKey, LayerVisibility, MapPlace } from './infrastructure';
@@ -19,13 +20,14 @@ import {
   updateActiveTransportLine,
   updateLiveVehicleLayer,
 } from './mobility-map';
-import type { ActiveLineRoute } from './mobility-map';
+import type { ActiveLineRoute, NetworkSubFilters } from './mobility-map';
 import type { LiveVehicle } from './stpt-live';
 import { clearTransitRoute, drawTransitRoute } from './transit-map';
 import type { TransitOption } from './transitRouter';
 import { municipalFeatureAt, openMunicipalFeature, showMunicipalReports } from './municipal-reports-map';
 import type { MunicipalReport } from './municipal-reports';
 import type { VeloStation } from './velo-live';
+import type { OfficialCityEvent } from './city-events';
 
 type Props = {
   theme: Theme;
@@ -44,6 +46,7 @@ type Props = {
   focus: number;
   infrastructure: Partial<Infrastructure>;
   visibility: LayerVisibility;
+  networkSubFilters?: NetworkSubFilters;
   transit?: TransitOption;
   mobilePanelOpen: boolean;
   liveVehicles: LiveVehicle[];
@@ -53,12 +56,16 @@ type Props = {
   veloStations?: VeloStation[];
   selectedVeloStation?: VeloStation | null;
   onSelectVeloStation?: (station: VeloStation) => void;
+  cityEvents?: OfficialCityEvent[];
+  selectedCityEvent?: OfficialCityEvent | null;
+  onSelectCityEvent?: (event: OfficialCityEvent) => void;
   municipalReports?: MunicipalReport[];
   selectedMunicipal?: MunicipalReport;
   onSelectMunicipal: (number: string) => void;
   labels: boolean;
   mapFit: number;
   buildings: boolean;
+  baseMapStyle?: BaseMapStyle;
   focusedPlace?: MapPlace;
   onInspectPlace: (place: MapPlace) => void;
   onInspectLine: (info: { title: string; description: string }) => void;
@@ -71,9 +78,51 @@ const icons = {
 };
 maplibregl.setWorkerUrl(workerUrl);
 
+const satelliteSourceId = 'satellite-imagery-source';
+const satelliteLayerId = 'satellite-imagery-layer';
+
 const basemap = (theme: Theme) => `https://tiles.openfreemap.org/styles/${theme === 'dark' ? 'dark' : 'liberty'}`;
+
+function syncSatelliteLayer(map: maplibregl.Map, enabled: boolean) {
+  if (!map.getSource(satelliteSourceId)) {
+    map.addSource(satelliteSourceId, {
+      type: 'raster',
+      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: 'Esri World Imagery',
+    });
+  }
+  if (!map.getLayer(satelliteLayerId)) {
+    const firstRoadOrLabel = map.getStyle().layers.find(
+      l => l.type === 'symbol' || l.id.startsWith('highway_') || l.id.startsWith('road_'),
+    )?.id;
+    map.addLayer(
+      {
+        id: satelliteLayerId,
+        type: 'raster',
+        source: satelliteSourceId,
+        layout: { visibility: enabled ? 'visible' : 'none' },
+        paint: { 'raster-opacity': 0.92 },
+      },
+      firstRoadOrLabel,
+    );
+  } else {
+    map.setLayoutProperty(satelliteLayerId, 'visibility', enabled ? 'visible' : 'none');
+  }
+}
+
 function baseLayers(map: maplibregl.Map, props: Props) {
-  applyBaseStyle(map, { buildings: props.buildings, places: false, dark: props.theme === 'dark' });
+  const mode = props.baseMapStyle ?? (props.buildings ? 'buildings3d' : 'minimal');
+  const showBuildings = mode === 'buildings3d' || (props.buildings && mode !== 'minimal' && mode !== 'satellite');
+  const show3dExtrusions = mode === 'buildings3d';
+  applyBaseStyle(map, {
+    buildings: showBuildings,
+    buildings3d: show3dExtrusions,
+    places: false,
+    dark: props.theme === 'dark',
+  });
+  syncSatelliteLayer(map, mode === 'satellite');
 }
 
 export default function MapCanvas(props: Props) {
@@ -83,6 +132,7 @@ export default function MapCanvas(props: Props) {
   latest.current = props;
   const styleReady = useRef(false);
   const appliedTheme = useRef(props.theme);
+  const lastBaseStyle = useRef<BaseMapStyle | undefined>(props.baseMapStyle);
   const styleDeadline = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastFittedRoute = useRef<{ instance: maplibregl.Map; route: RouteResult | TransitOption; panelOpen: boolean } | undefined>(undefined);
   const lastFittedLineKey = useRef<string>('');
@@ -114,7 +164,7 @@ export default function MapCanvas(props: Props) {
     }
     map.current = instance;
     instance.addControl(new maplibregl.AttributionControl({ compact: false }), 'bottom-left');
-    instance.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+    instance.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
     instance.on('load', () => {
       setReady(value => value + 1);
       setError(false);
@@ -251,7 +301,7 @@ export default function MapCanvas(props: Props) {
       const label = document.createElement('span');
       label.className = 'map-pin-label';
       const category = document.createElement('small');
-      category.textContent = meta[pin.type].label;
+      category.textContent = pin.subcategory ? `${meta[pin.type].label} · ${pin.subcategory}` : meta[pin.type].label;
       const title = document.createElement('strong');
       title.textContent = pin.title;
       label.append(category, title);
@@ -310,12 +360,74 @@ export default function MapCanvas(props: Props) {
     });
   }, [props.selectedVeloStation?.id, attempt]);
 
+  // Official Municipal & Cultural Event Markers on the map
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !props.cityEvents?.length) return;
+    const markers = props.cityEvents.map(ev => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      const isSelected = props.selectedCityEvent?.id === ev.id;
+      button.className = `city-event-map-marker ${isSelected ? 'selected' : ''}`;
+      const dateStr = ev.startsAt.slice(0, 10);
+      button.title = `${ev.title} (${dateStr}${ev.timeLabel ? ` · ${ev.timeLabel}` : ''}) — ${ev.venue}`;
+      button.setAttribute('aria-label', button.title);
+
+      const badge = document.createElement('span');
+      badge.className = 'city-event-marker-badge';
+      badge.textContent = '🎭';
+
+      const copy = document.createElement('span');
+      copy.className = 'city-event-marker-copy';
+      const dateTag = document.createElement('small');
+      dateTag.textContent = `${dateStr} · ${ev.venue}`;
+      const titleTag = document.createElement('strong');
+      titleTag.textContent = ev.title.length > 34 ? `${ev.title.slice(0, 32)}…` : ev.title;
+      copy.append(dateTag, titleTag);
+
+      button.append(badge, copy);
+      button.addEventListener('click', clickEv => {
+        clickEv.stopPropagation();
+        latest.current.onSelectCityEvent?.(ev);
+      });
+
+      return new maplibregl.Marker({ element: button, anchor: 'center' })
+        .setLngLat([ev.lon, ev.lat])
+        .addTo(instance);
+    });
+    return () => markers.forEach(marker => marker.remove());
+  }, [props.cityEvents, props.selectedCityEvent?.id, attempt]);
+
+  useEffect(() => {
+    if (!props.selectedCityEvent || !map.current) return;
+    map.current.easeTo({
+      center: [props.selectedCityEvent.lon, props.selectedCityEvent.lat],
+      zoom: Math.max(map.current.getZoom(), 15.8),
+      duration: 480,
+    });
+  }, [props.selectedCityEvent?.id, attempt]);
+
   useEffect(() => {
     const instance = map.current;
     if (!instance || !styleReady.current) return;
     baseLayers(instance, props);
+    if (lastBaseStyle.current !== props.baseMapStyle) {
+      lastBaseStyle.current = props.baseMapStyle;
+      if (props.baseMapStyle === 'buildings3d') {
+        instance.easeTo({
+          pitch: 45,
+          zoom: Math.max(instance.getZoom(), 15.2),
+          duration: 520,
+        });
+      } else if (props.baseMapStyle === 'minimal' || props.baseMapStyle === 'satellite') {
+        if (instance.getPitch() > 0) {
+          instance.easeTo({ pitch: 0, duration: 420 });
+        }
+      }
+    }
     hitLayers.current = [...placeLayerIds];
     const dark = appliedTheme.current === 'dark';
+    const showBuildings = props.baseMapStyle ? props.baseMapStyle === 'buildings3d' : props.buildings;
     if (!instance.getLayer('building-addresses') && !instance.getStyle().layers.some(layer => 'source-layer' in layer && layer['source-layer'] === 'housenumber')) {
       const buildingLayer = instance.getStyle().layers.find(layer => layer.type === 'fill' && layer['source-layer'] === 'building');
       if (buildingLayer && 'source' in buildingLayer) {
@@ -329,7 +441,7 @@ export default function MapCanvas(props: Props) {
             'text-field': ['get', 'housenumber'],
             'text-font': ['Noto Sans Regular'],
             'text-size': 10,
-            visibility: props.buildings ? 'visible' : 'none',
+            visibility: showBuildings ? 'visible' : 'none',
           },
           paint: {
             'text-color': dark ? '#c4cde0' : '#827767',
@@ -339,9 +451,11 @@ export default function MapCanvas(props: Props) {
         });
       }
     }
-    hitLayers.current.push(...addMobilityLines(instance, props.infrastructure, props.visibility));
+    hitLayers.current.push(
+      ...addMobilityLines(instance, props.infrastructure, props.visibility, props.networkSubFilters),
+    );
     orderMobilityLayers(instance);
-  }, [props.infrastructure, props.visibility, props.buildings, ready]);
+  }, [props.infrastructure, props.visibility, props.networkSubFilters, props.buildings, props.baseMapStyle, ready]);
 
   // Exclusive Active Transport Line rendering + camera fit
   useEffect(() => {
@@ -462,6 +576,7 @@ export default function MapCanvas(props: Props) {
     if (!instance || !props.mapFit) return;
     const bounds = new maplibregl.LngLatBounds();
     props.pins.forEach(pin => bounds.extend([pin.location.lon, pin.location.lat]));
+    props.cityEvents?.forEach(ev => bounds.extend([ev.lon, ev.lat]));
     props.municipalReports?.forEach(report => {
       if (report.coordinates) bounds.extend(report.coordinates);
     });
@@ -536,11 +651,15 @@ export default function MapCanvas(props: Props) {
   useEffect(() => {
     const instance = map.current;
     if (!instance || !props.routePoints.length || props.picking || props.route) return;
+    const total = props.routePoints.length;
     const markers = props.routePoints.map(({ location, title, destination }, index) => {
+      const isStart = index === 0;
+      const isEnd = Boolean(destination) || (total > 1 && index === total - 1);
+      const label = isStart ? 'A' : isEnd ? 'B' : String(index);
       const element = document.createElement('div');
-      element.className = `route-number route-planned-point ${index === 0 ? 'point-a' : 'point-b'}`;
-      element.textContent = index === 0 ? 'A' : destination ? 'B' : String(index);
-      element.title = index === 0 ? `Punctul A: ${title}` : `Punctul B: ${title}`;
+      element.className = `route-number route-planned-point ${isStart ? 'point-a' : isEnd ? 'point-b' : 'point-waypoint'}`;
+      element.textContent = label;
+      element.title = isStart ? `Punctul A: ${title}` : isEnd ? `Punctul B: ${title}` : `Oprire intermediară ${index}: ${title}`;
       element.setAttribute('aria-label', element.title);
       return new maplibregl.Marker({ element }).setLngLat([location.lon, location.lat]).addTo(instance);
     });
@@ -567,14 +686,17 @@ export default function MapCanvas(props: Props) {
         paint: { 'line-color': '#0F52BA', 'line-width': 5 },
         layout: { 'line-join': 'round', 'line-cap': 'round' },
       });
+      const totalWp = props.route.order.length;
       props.route.order.forEach((index, visit) => {
         const point = props.route!.waypoints[index];
         const isStart = visit === 0;
+        const isEnd = visit === totalWp - 1;
+        const label = isStart ? 'A' : isEnd ? 'B' : String(visit);
         const element = document.createElement('div');
-        element.className = `route-number ${isStart ? 'route-origin point-a' : 'point-b'}`;
-        element.style.background = isStart ? '#059669' : '#0F52BA';
-        element.textContent = isStart ? 'A' : 'B';
-        element.title = isStart ? 'Punctul A (Plecare)' : 'Punctul B (Destinație)';
+        element.className = `route-number ${isStart ? 'route-origin point-a' : isEnd ? 'point-b' : 'point-waypoint'}`;
+        element.style.background = isStart ? '#059669' : isEnd ? '#0F52BA' : '#d97706';
+        element.textContent = label;
+        element.title = isStart ? 'Punctul A (Plecare)' : isEnd ? 'Punctul B (Destinație)' : `Oprire intermediară ${visit}`;
         markers.push(new maplibregl.Marker({ element }).setLngLat([point.lon, point.lat]).addTo(instance));
       });
     } else if (props.transit) {

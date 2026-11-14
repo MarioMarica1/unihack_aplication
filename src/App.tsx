@@ -1,5 +1,5 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { FormEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowUpDown,
@@ -12,7 +12,6 @@ import {
   CheckCircle2,
   Compass,
   ExternalLink,
-  Flag,
   Footprints,
   Layers,
   LocateFixed,
@@ -32,13 +31,23 @@ import {
   Sparkles,
   Sun,
   ThumbsUp,
+  Ticket,
   TrainFront,
   Trash2,
   Upload,
   Users,
   X,
 } from 'lucide-react';
-import { activityState, center, dateLabel, distance, formSchema, meta, people } from './domain';
+import {
+  activityState,
+  center,
+  dateLabel,
+  distance,
+  formSchema,
+  meta,
+  people,
+  reportSubcategories,
+} from './domain';
 import type { Action, FormInput, Person, Pin, PinType, Point, State } from './domain';
 import { calculateRoute } from './routing';
 import type { RouteResult, TravelMode } from './routing';
@@ -49,6 +58,7 @@ import PlacesPanel, { findPlaces, normalizeSearch, placeLink } from './PlacesPan
 import { PlaceIcon } from './place-icons';
 import { applyTheme, readTheme } from './theme';
 import type { Theme } from './theme';
+import type { BaseMapStyle } from './map-style';
 import { useStptVehicles } from './stpt-live';
 import type { LiveVehicle } from './stpt-live';
 import { getLineSummaries, loadTransitNetwork, planTransit } from './transitRouter';
@@ -65,8 +75,9 @@ import { NewsFeedPanel } from './NewsFeedPanel';
 import type { TemporalWindow } from './NewsFeedPanel';
 import { useVeloStations } from './velo-live';
 import type { VeloStation } from './velo-live';
-import type { ActiveLineRoute } from './mobility-map';
-import type { ReactNode } from 'react';
+import { useCityEvents } from './city-events';
+import type { OfficialCityEvent } from './city-events';
+import type { ActiveLineRoute, NetworkSubFilters } from './mobility-map';
 
 const MapCanvas = lazy(() => import('./MapCanvas'));
 
@@ -154,14 +165,20 @@ function readInitialModuleFromUrl(): SidebarTab {
 
 const typeIcons = { report: AlertTriangle, activity: Calendar, discussion: MessageSquare };
 
-const emptyForm = (type: PinType = 'report', location: Point = center): FormInput => ({
-  type,
-  title: '',
-  description: '',
-  category: meta[type].categories[0],
-  place: 'Timișoara',
-  location,
-});
+const emptyForm = (type: PinType = 'report', location: Point = center): FormInput => {
+  const defaultCategory = meta[type].categories[0];
+  const defaultSubcategory =
+    type === 'report' ? reportSubcategories[defaultCategory]?.[0] : undefined;
+  return {
+    type,
+    title: '',
+    description: '',
+    category: defaultCategory,
+    subcategory: defaultSubcategory,
+    place: 'Timișoara',
+    location,
+  };
+};
 
 function toLocalInput(iso?: string): string {
   const d = iso ? new Date(iso) : new Date(Date.now() + 86400000);
@@ -192,6 +209,8 @@ type RouteEndpoint = {
   title: string;
 };
 
+type PickTarget = 'form' | 'pointA' | 'pointB' | `waypoint:${number}` | null;
+
 export default function App({
   cloud,
   externalState,
@@ -202,11 +221,11 @@ export default function App({
 }: AppProps = {}) {
   const [state, setState] = useState<State | null>(externalState ?? null);
   const [fatal, setFatal] = useState('');
-  const [userId, setUserId] = useState(() => localStorage.getItem('vecin-user') || 'radu');
+  const [userId] = useState(() => localStorage.getItem('vecin-user') || 'radu');
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>(() => readInitialModuleFromUrl());
 
-  // Decoupled Community Filters (only activity & discussion — never report!)
-  const [communityFilter, setCommunityFilter] = useState<'all' | 'activity' | 'discussion' | 'saved'>('all');
+  // Decoupled Community Filters (official events, citizen activities & discussions — zero reports!)
+  const [communityFilter, setCommunityFilter] = useState<'all' | 'official' | 'activity' | 'discussion' | 'saved'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'active' | 'near'>('newest');
 
   // Decoupled Reports Filters
@@ -217,13 +236,21 @@ export default function App({
   // News Feed Temporal Filter (Zilnic, Săptămânal, Lunar)
   const [newsTemporalWindow, setNewsTemporalWindow] = useState<TemporalWindow>('weekly');
 
-  // Transport Module Exclusive Line & Direction State
+  // Transport Module Exclusive Line, Direction & Network Sub-filters State
   const [selectedTransportLine, setSelectedTransportLine] = useState<string>('');
   const [selectedTransportDirection, setSelectedTransportDirection] = useState<'tur' | 'retur'>('tur');
   const [showAllTransportRoutes, setShowAllTransportRoutes] = useState<boolean>(false);
+  const [networkSubFilters, setNetworkSubFilters] = useState<NetworkSubFilters>({
+    tram: true,
+    trolleybus: false,
+    bus: false,
+  });
 
   // Velo Module Selected Station
   const [selectedVeloStation, setSelectedVeloStation] = useState<VeloStation | null>(null);
+
+  // Official City Event Selected on Map / Feed
+  const [selectedCityEvent, setSelectedCityEvent] = useState<OfficialCityEvent | null>(null);
 
   // Search & Omni-Search
   const [search, setSearch] = useState('');
@@ -236,18 +263,22 @@ export default function App({
   const [selectedPlace, setSelectedPlace] = useState<MapPlace | null>(null);
 
   // Modals & Creation (Decoupled: Report Modal vs Community Modal)
-  const [modal, setModal] = useState<'create-report' | 'create-community' | 'edit' | 'profile' | null>(null);
+  const [modal, setModal] = useState<'create-report' | 'create-community' | 'edit' | 'profile' | null>(
+    () => (cloud?.reopenAccount ? 'profile' : null),
+  );
   const [form, setForm] = useState<FormInput>(() => emptyForm());
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
-  const [pickTarget, setPickTarget] = useState<'form' | 'pointA' | 'pointB' | null>(null);
+  const [pickTarget, setPickTarget] = useState<PickTarget>(null);
 
-  // Google Maps Style Routing (Unified Point A + Point B + Central Swap)
+  // Google Maps Style Routing (Point A + Waypoints + Point B + Central Swap + Live GTFS-RT)
   const [pointA, setPointA] = useState<RouteEndpoint>({
     location: center,
     title: 'Piața Victoriei, Timișoara',
   });
+  const [waypoints, setWaypoints] = useState<RouteEndpoint[]>([]);
+  const [waypointQueries, setWaypointQueries] = useState<string[]>([]);
   const [pointB, setPointB] = useState<RouteEndpoint | null>(null);
   const [pointAQuery, setPointAQuery] = useState('');
   const [pointBQuery, setPointBQuery] = useState('');
@@ -257,10 +288,24 @@ export default function App({
   const [routeBusy, setRouteBusy] = useState(false);
   const [userLocation, setUserLocation] = useState<Point | undefined>();
 
-  // Map & Smart Layers
+  // Map, Base Map Style Controller & Smart POI Layers
   const [focus, setFocus] = useState(0);
   const [mapFit, setMapFit] = useState(0);
   const [theme, setTheme] = useState<Theme>(() => readTheme());
+  const [baseMapStyle, setBaseMapStyle] = useState<BaseMapStyle>('buildings3d');
+  const [enabledPoiKinds, setEnabledPoiKinds] = useState<Record<string, boolean>>({
+    health: true,
+    park: true,
+    services: true,
+    education: true,
+    culture: true,
+    food: true,
+    transport: true,
+    shop: true,
+    sport: true,
+    lodging: true,
+    building: true,
+  });
   const [layers, setLayers] = useState<LayerVisibility>(defaultLayerVisibility);
   const [pinLabels] = useState(false);
   const [showBuildings] = useState(true);
@@ -289,6 +334,7 @@ export default function App({
     sidebarTab === 'reports' || sidebarTab === 'news',
   );
   const veloFeed = useVeloStations(sidebarTab === 'velo');
+  const cityEventsFeed = useCityEvents(sidebarTab === 'community');
   const { detail: municipalDetail } = useMunicipalReportDetail(selectedMunicipalNumber || undefined);
 
   const detailHeading = useRef<HTMLHeadingElement>(null);
@@ -296,6 +342,12 @@ export default function App({
   const modalRef = useRef<HTMLDivElement>(null);
   const routeAbort = useRef<AbortController | null>(null);
   const geocodeAbort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (cloud?.reopenAccount) {
+      setModal('profile');
+    }
+  }, [cloud?.reopenAccount]);
 
   // Load Transit Network (GTFS patterns & stops)
   useEffect(() => {
@@ -322,9 +374,15 @@ export default function App({
     setSelectedMunicipalNumber('');
     setSelectedVehicleId('');
     setSelectedVeloStation(null);
+    setSelectedCityEvent(null);
     setSelectedPlace(null);
     setInfrastructureInspection(null);
     setPickTarget(null);
+
+    if (nextTab !== 'route') {
+      setRoute(undefined);
+      setTransitRoute(undefined);
+    }
 
     // Sync browser URL route
     const targetPath = moduleRoutePaths[nextTab];
@@ -461,9 +519,25 @@ export default function App({
   }
 
   const allPeople = state?.people?.length ? state.people : people;
-  const user = externalUser ?? cloud?.user ?? (allPeople.find(p => p.id === userId) || allPeople[0]);
+  const isUnauthenticatedCloud = Boolean(cloud && !cloud.user);
+  const user: Person =
+    externalUser ??
+    cloud?.user ??
+    (cloud
+      ? { id: 'guest', name: 'Vizitator', initials: 'VZ', color: '#EBF3FF' }
+      : allPeople.find(p => p.id === userId) || allPeople[0]);
   const personById = (id: string): Person =>
-    allPeople.find(p => p.id === id) || (user?.id === id ? user : { id, name: 'Cetățean', initials: 'CT', color: '#EBF3FF' });
+    allPeople.find(p => p.id === id) ||
+    (user?.id === id ? user : { id, name: 'Cetățean', initials: 'CT', color: '#EBF3FF' });
+
+  function requireAuthenticatedUser(): boolean {
+    if (isUnauthenticatedCloud) {
+      setModal('profile');
+      setToast({ text: 'Autentifică-te cu Google sau e-mail pentru a continua.', error: true });
+      return false;
+    }
+    return true;
+  }
 
   // Strictly Decoupled Collections: Citizen Reports vs Community Posts
   const activePins = useMemo(() => (state?.pins || []).filter(p => !p.deleted && !p.demo), [state]);
@@ -507,10 +581,31 @@ export default function App({
     };
   }, [sidebarTab, showAllTransportRoutes, selectedTransportLine, selectedTransportDirection, lineSummaries]);
 
-  // Filtered Live Vehicles for the Map (isolated to Transport module & selected line/direction!)
+  // Filtered Live Vehicles for the Map:
+  // 1) In 'transport': isolated to selected line+direction, or filtered by networkSubFilters when Show All is enabled
+  // 2) In 'route': when a public transit route is active, cross-references and displays the live GPS vehicles on the suggested transit lines!
   const mapLiveVehicles = useMemo<LiveVehicle[]>(() => {
+    if (sidebarTab === 'route' && transitRoute) {
+      const option = transitRoute.options[transitRoute.selected];
+      if (!option) return [];
+      const assignedLines = new Set(
+        option.steps
+          .filter(s => s.kind === 'ride')
+          .map(s => s.line.toUpperCase()),
+      );
+      if (assignedLines.size === 0) return [];
+      return stptFeed.vehicles.filter(v => assignedLines.has(v.line.toUpperCase()));
+    }
     if (sidebarTab !== 'transport') return [];
-    if (!showAllTransportRoutes && selectedTransportLine) {
+    if (showAllTransportRoutes) {
+      return stptFeed.vehicles.filter(v => {
+        if (v.type === 'tram' && !networkSubFilters.tram) return false;
+        if (v.type === 'trolleybus' && !networkSubFilters.trolleybus) return false;
+        if (v.type === 'bus' && !networkSubFilters.bus) return false;
+        return true;
+      });
+    }
+    if (selectedTransportLine) {
       return stptFeed.vehicles.filter(v => {
         if (v.line.toUpperCase() !== selectedTransportLine.toUpperCase()) return false;
         if (v.directionId) {
@@ -521,13 +616,26 @@ export default function App({
       });
     }
     return stptFeed.vehicles;
-  }, [sidebarTab, showAllTransportRoutes, selectedTransportLine, selectedTransportDirection, stptFeed.vehicles]);
+  }, [
+    sidebarTab,
+    transitRoute,
+    showAllTransportRoutes,
+    networkSubFilters,
+    selectedTransportLine,
+    selectedTransportDirection,
+    stptFeed.vehicles,
+  ]);
 
-  // Filtered Community List (strictly decoupled: only activity & discussion)
+  // Filtered Community List (strictly decoupled: zero reports!)
   const visibleCommunityPins = useMemo(() => {
+    if (communityFilter === 'official') return [];
     const q = search.trim().toLowerCase();
     return communityPostPins
-      .filter(p => (communityFilter === 'saved' ? savedIds.includes(p.id) : communityFilter === 'all' || p.type === communityFilter))
+      .filter(p =>
+        communityFilter === 'saved'
+          ? savedIds.includes(p.id)
+          : communityFilter === 'all' || p.type === communityFilter,
+      )
       .filter(p => !q || `${p.title} ${p.description} ${p.category} ${p.place}`.toLowerCase().includes(q))
       .sort((a, b) => {
         if (sortBy === 'near') return distance(a.location, pointA.location) - distance(b.location, pointA.location);
@@ -540,12 +648,21 @@ export default function App({
       });
   }, [communityPostPins, communityFilter, savedIds, search, sortBy, pointA.location, state?.messages]);
 
+  // Filtered Official Municipal & Cultural Events for Community tab
+  const visibleCityEvents = useMemo(() => {
+    if (communityFilter === 'discussion' || communityFilter === 'saved') return [];
+    const q = search.trim().toLowerCase();
+    return cityEventsFeed.events.filter(
+      ev => !q || `${ev.title} ${ev.venue} ${ev.category} ${ev.source}`.toLowerCase().includes(q),
+    );
+  }, [cityEventsFeed.events, communityFilter, search]);
+
   // Filtered Citizen Reports
   const visibleCitizenReports = useMemo(() => {
     const q = search.trim().toLowerCase();
     return citizenReportPins
-      .filter(p => reportsSourceFilter !== 'municipal')
-      .filter(p => !q || `${p.title} ${p.description} ${p.category} ${p.place}`.toLowerCase().includes(q))
+      .filter(() => reportsSourceFilter !== 'municipal')
+      .filter(p => !q || `${p.title} ${p.description} ${p.category} ${p.subcategory ?? ''} ${p.place}`.toLowerCase().includes(q))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [citizenReportPins, reportsSourceFilter, search]);
 
@@ -606,11 +723,11 @@ export default function App({
 
   const placeFeatures = infrastructure.places?.features || [];
   const filteredPlaces = useMemo(
-    () => findPlaces(infrastructure, search, placeCategory),
-    [infrastructure, search, placeCategory],
+    () => findPlaces(infrastructure, search, placeCategory, enabledPoiKinds),
+    [infrastructure, search, placeCategory, enabledPoiKinds],
   );
 
-  // Autocomplete candidates for Google Maps-style Route Planner (Point A & Point B)
+  // Autocomplete candidates for Google Maps-style Route Planner (Point A, Waypoints & Point B)
   const allRouteCandidates = useMemo(() => {
     const items: RouteEndpoint[] = [];
     const seen = new Set<string>();
@@ -654,7 +771,7 @@ export default function App({
       .slice(0, 4);
     const places = findPlaces(infrastructure, search, 'all').slice(0, 4);
     const reports = citizenReportPins
-      .filter(p => normalizeSearch(`${p.title} ${p.place} ${p.category}`).includes(q))
+      .filter(p => normalizeSearch(`${p.title} ${p.place} ${p.category} ${p.subcategory ?? ''}`).includes(q))
       .slice(0, 3);
     const pmt = (municipalFeed.allReports.length ? municipalFeed.allReports : municipalFeed.reports)
       .filter(r => normalizeSearch(`${r.number} ${r.title} ${r.category}`).includes(q))
@@ -663,6 +780,7 @@ export default function App({
   }, [search, lineSummaries, infrastructure, citizenReportPins, municipalFeed.allReports, municipalFeed.reports]);
 
   async function run(action: Action, okText?: string) {
+    if (!requireAuthenticatedUser()) return false;
     setBusy(true);
     setFormError('');
     try {
@@ -686,12 +804,14 @@ export default function App({
   }
 
   function openCreateReport(defaultLocation = pointA.location) {
+    if (!requireAuthenticatedUser()) return;
     setForm(emptyForm('report', defaultLocation));
     setFormError('');
     setModal('create-report');
   }
 
   function openCreateCommunity(type: 'activity' | 'discussion' = 'activity', defaultLocation = pointA.location) {
+    if (!requireAuthenticatedUser()) return;
     setForm({
       ...emptyForm(type, defaultLocation),
       startsAt: type === 'activity' ? toLocalInput() : undefined,
@@ -706,6 +826,7 @@ export default function App({
     setSelectedMunicipalNumber('');
     setSelectedVehicleId('');
     setSelectedVeloStation(null);
+    setSelectedCityEvent(null);
     setSelectedPlace(null);
     setSelectedPinId(id);
     if (id) setMobilePanelOpen(true);
@@ -715,6 +836,7 @@ export default function App({
     setSelectedPinId('');
     setSelectedVehicleId('');
     setSelectedVeloStation(null);
+    setSelectedCityEvent(null);
     setSelectedPlace(null);
     setSelectedMunicipalNumber(number);
     if (number) {
@@ -730,24 +852,27 @@ export default function App({
     setSelectedPinId('');
     setSelectedMunicipalNumber('');
     setSelectedVeloStation(null);
+    setSelectedCityEvent(null);
     setSelectedPlace(null);
-    if (sidebarTab !== 'transport') {
+    if (sidebarTab !== 'transport' && sidebarTab !== 'route') {
       switchModule('transport');
     }
     setSelectedVehicleId(vehicle.id);
-    // Isolate exclusively that vehicle's line and direction on the map!
-    setSelectedTransportLine(vehicle.line);
-    if (vehicle.directionId === '1') {
-      setSelectedTransportDirection('retur');
-    } else if (vehicle.directionId === '0') {
-      setSelectedTransportDirection('tur');
+    if (sidebarTab === 'transport') {
+      // Isolate exclusively that vehicle's line and direction on the map!
+      setSelectedTransportLine(vehicle.line);
+      if (vehicle.directionId === '1') {
+        setSelectedTransportDirection('retur');
+      } else if (vehicle.directionId === '0') {
+        setSelectedTransportDirection('tur');
+      }
+      setShowAllTransportRoutes(false);
+      setLayers(prev => ({
+        ...prev,
+        tramways: false,
+        busways: false,
+      }));
     }
-    setShowAllTransportRoutes(false);
-    setLayers(prev => ({
-      ...prev,
-      tramways: false,
-      busways: false,
-    }));
     setMobilePanelOpen(true);
   }
 
@@ -779,6 +904,12 @@ export default function App({
     }));
   }
 
+  function handleChangeNetworkSubFilters(next: NetworkSubFilters) {
+    setNetworkSubFilters(next);
+    if (next.tram) void ensureLayerData('tramways');
+    if (next.trolleybus || next.bus) void ensureLayerData('busways');
+  }
+
   // Smart Layers Category Selection (auto-zoom & layer isolation)
   function handleSelectSmartCategory(cat: string) {
     setPlaceCategory(cat);
@@ -793,7 +924,15 @@ export default function App({
     setMapFit(v => v + 1);
   }
 
-  // Google Maps Style Routing: Start / Swap / Calculate
+  function handleTogglePoiKind(kind: string) {
+    setEnabledPoiKinds(prev => ({
+      ...prev,
+      [kind]: prev[kind] === false ? true : false,
+    }));
+    setMapFit(v => v + 1);
+  }
+
+  // Google Maps Style Routing: Start / Waypoints / Swap / Calculate
   function startRouteToDestination(dest: RouteEndpoint, mode: RouteMode = travelMode) {
     setTravelMode(mode);
     switchModule('route');
@@ -801,7 +940,37 @@ export default function App({
     setPointBQuery(dest.title);
     setRoute(undefined);
     setTransitRoute(undefined);
-    void calculateRouteBetween(pointA, dest, mode);
+    void calculateRouteBetween(pointA, dest, mode, waypoints);
+  }
+
+  function addWaypoint() {
+    if (waypoints.length >= 5) {
+      setToast({ text: 'Poți adăuga cel mult 5 opriri intermediare.', error: true });
+      return;
+    }
+    const defaultWp: RouteEndpoint = {
+      location: { lon: 21.2289, lat: 45.7566 },
+      title: 'Piața Unirii, Timișoara',
+    };
+    const nextWps = [...waypoints, defaultWp];
+    setWaypoints(nextWps);
+    setWaypointQueries([...waypointQueries, defaultWp.title]);
+  }
+
+  function updateWaypoint(index: number, endpoint: RouteEndpoint) {
+    const nextWps = waypoints.map((w, idx) => (idx === index ? endpoint : w));
+    const nextQueries = waypointQueries.map((q, idx) => (idx === index ? endpoint.title : q));
+    setWaypoints(nextWps);
+    setWaypointQueries(nextQueries);
+    if (pointB) void calculateRouteBetween(pointA, pointB, travelMode, nextWps);
+  }
+
+  function removeWaypoint(index: number) {
+    const nextWps = waypoints.filter((_, idx) => idx !== index);
+    const nextQueries = waypointQueries.filter((_, idx) => idx !== index);
+    setWaypoints(nextWps);
+    setWaypointQueries(nextQueries);
+    if (pointB) void calculateRouteBetween(pointA, pointB, travelMode, nextWps);
   }
 
   function swapRouteEndpoints() {
@@ -811,19 +980,24 @@ export default function App({
     }
     const prevA = pointA;
     const prevB = pointB;
+    const reversedWps = [...waypoints].reverse();
+    const reversedQueries = [...waypointQueries].reverse();
     setPointA(prevB);
     setPointB(prevA);
     setPointAQuery(prevB.title);
     setPointBQuery(prevA.title);
+    setWaypoints(reversedWps);
+    setWaypointQueries(reversedQueries);
     setRoute(undefined);
     setTransitRoute(undefined);
-    void calculateRouteBetween(prevB, prevA, travelMode);
+    void calculateRouteBetween(prevB, prevA, travelMode, reversedWps);
   }
 
   async function calculateRouteBetween(
     origin: RouteEndpoint = pointA,
     destination: RouteEndpoint | null = pointB,
     mode: RouteMode = travelMode,
+    currentWaypoints: RouteEndpoint[] = waypoints,
   ) {
     if (!destination) {
       setToast({ text: 'Selectează Punctul B (Destinația) pentru calculul rutei.', error: true });
@@ -840,13 +1014,20 @@ export default function App({
       if (mode === 'transit') {
         const transitPoints: TransitPoint[] = [
           { ...origin.location, name: origin.title },
+          ...currentWaypoints.map(w => ({ ...w.location, name: w.title })),
           { ...destination.location, name: destination.title },
         ];
         const planned = await planTransit(transitPoints, controller.signal);
         setTransitRoute({ ...planned, selected: 0 });
-        setToast({ text: 'Rutele STPT au fost calculate.' });
+        setToast({ text: 'Rutele STPT și vehiculele live au fost calculate.' });
       } else {
-        const result = await calculateRoute(origin.location, destination.location, [], controller.signal, mode);
+        const result = await calculateRoute(
+          origin.location,
+          destination.location,
+          currentWaypoints.map(w => w.location),
+          controller.signal,
+          mode,
+        );
         setRoute(result);
         setToast({ text: result.warnings[0] || 'Traseul A → B a fost calculat.' });
       }
@@ -908,9 +1089,18 @@ export default function App({
         const resolvedB = { location: point, title: label };
         setPointB(resolvedB);
         setPointBQuery(label);
-        void calculateRouteBetween(pointA, resolvedB, travelMode);
+        void calculateRouteBetween(pointA, resolvedB, travelMode, waypoints);
       } else {
-        void calculateRouteBetween(pointA, nextB, travelMode);
+        void calculateRouteBetween(pointA, nextB, travelMode, waypoints);
+      }
+    } else if (pickTarget && pickTarget.startsWith('waypoint:')) {
+      const wpIndex = Number(pickTarget.split(':')[1]);
+      setPickTarget(null);
+      const fallbackTitle = `${point.lat.toFixed(4)}, ${point.lon.toFixed(4)}`;
+      updateWaypoint(wpIndex, { location: point, title: fallbackTitle });
+      const label = await reverseGeocode(point, new AbortController().signal);
+      if (label) {
+        updateWaypoint(wpIndex, { location: point, title: label });
       }
     }
   }
@@ -919,6 +1109,7 @@ export default function App({
     e.preventDefault();
     const candidate: FormInput = {
       ...form,
+      subcategory: form.type === 'report' ? form.subcategory || reportSubcategories[form.category]?.[0] : undefined,
       startsAt: form.type === 'activity' && form.startsAt ? new Date(form.startsAt).toISOString() : undefined,
       endsAt: form.type === 'activity' && form.endsAt ? new Date(form.endsAt).toISOString() : undefined,
       capacity: form.type === 'activity' && form.capacity ? Number(form.capacity) : undefined,
@@ -937,7 +1128,7 @@ export default function App({
       if (
         await run(
           { type: 'create', id, input: parsed.data, userId: user.id },
-          parsed.data.type === 'report' ? 'Sesizarea a fost înregistrată.' : 'Postarea a fost publicată în Comunitate.',
+          parsed.data.type === 'report' ? 'Sesizarea a fost înregistrată în baza de date.' : 'Postarea a fost publicată în Comunitate.',
         )
       ) {
         setModal(null);
@@ -1045,6 +1236,7 @@ export default function App({
               {meta[pin.type].label}
             </span>
             <span className="category-chip">{pin.category}</span>
+            {pin.subcategory && <span className="subcategory-chip">{pin.subcategory}</span>}
             {pin.reportedToMunicipality && (
               <span className="pmt-linked-badge" title="Raportat și pe sesizari.primariatm.ro">
                 Trimis PMT
@@ -1297,14 +1489,24 @@ export default function App({
           </button>
           <button
             type="button"
-            className="header-profile"
+            className={`header-profile ${isUnauthenticatedCloud ? 'unauthenticated' : ''}`}
             onClick={() => (onOpenAccount ? onOpenAccount() : setModal('profile'))}
-            aria-label={`Cont activ: ${user.name}`}
-            title={accountStatus ? `${user.name} · ${accountStatus}` : `Cont: ${user.name}`}
+            aria-label={isUnauthenticatedCloud ? 'Conectare cont Google sau e-mail' : `Cont activ: ${user.name}`}
+            title={
+              isUnauthenticatedCloud
+                ? 'Conectează-te cu Google sau e-mail'
+                : accountStatus
+                  ? `${user.name} · ${accountStatus}`
+                  : `Cont: ${user.name}`
+            }
           >
-            <span className="avatar" style={{ background: user.color }}>
-              {user.initials}
-            </span>
+            {isUnauthenticatedCloud ? (
+              <span className="header-login-pill">Conectare</span>
+            ) : (
+              <span className="avatar" style={{ background: user.color }}>
+                {user.initials}
+              </span>
+            )}
           </button>
         </div>
 
@@ -1435,7 +1637,7 @@ export default function App({
             </div>
 
             <div className="sidebar-content">
-              {/*Contextual Inspector Panels: Vehicle, Municipal Report, or Pin */}
+              {/* Contextual Inspector Panels: Vehicle, Municipal Report, or Pin */}
               {selectedVehicle ? (
                 <VehicleDetailPanel
                   vehicle={selectedVehicle}
@@ -1617,6 +1819,11 @@ export default function App({
                                 title: selected.title,
                                 description: selected.description,
                                 category: selected.category,
+                                subcategory:
+                                  selected.subcategory ??
+                                  (selected.type === 'report'
+                                    ? reportSubcategories[selected.category]?.[0]
+                                    : undefined),
                                 place: selected.place,
                                 location: selected.location,
                                 image: selected.image,
@@ -1663,6 +1870,7 @@ export default function App({
                       <div className="detail-badges">
                         <span className={`type-label ${selected.type}`}>{meta[selected.type].label}</span>
                         <span className="status-badge">{selected.category}</span>
+                        {selected.subcategory && <span className="subcategory-chip">{selected.subcategory}</span>}
                         {selected.type === 'report' && (
                           <span className={`status-badge ${selected.status}`}>
                             {selected.status === 'resolved' ? 'Rezolvată' : 'Deschisă'}
@@ -1847,7 +2055,7 @@ export default function App({
                   onOpenTransport={() => switchModule('transport')}
                 />
               ) : sidebarTab === 'transport' ? (
-                /* 2. TRANSPORT (Exclusiv linia selectată, Toggle Afișează toate, Tur/Retur, Săgeți direcționale) */
+                /* 2. TRANSPORT (Exclusiv linia selectată, Toggle Afișează Toate + Sub-filtre Tramvaie/Troleibuze/Autobuze, Tur/Retur) */
                 <TransportPanel
                   feed={stptFeed}
                   lineSummaries={lineSummaries}
@@ -1855,10 +2063,12 @@ export default function App({
                   selectedLine={selectedTransportLine}
                   selectedDirection={selectedTransportDirection}
                   showAllRoutes={showAllTransportRoutes}
+                  networkSubFilters={networkSubFilters}
                   onSelectVehicle={selectVehicle}
                   onSelectLine={handleSelectTransportLine}
                   onChangeDirection={setSelectedTransportDirection}
                   onToggleShowAllRoutes={handleToggleShowAllTransportRoutes}
+                  onChangeNetworkSubFilters={handleChangeNetworkSubFilters}
                   onPlanToStop={stop =>
                     startRouteToDestination(
                       { location: { lon: stop.lon, lat: stop.lat }, title: `Stația ${stop.name}` },
@@ -1897,7 +2107,7 @@ export default function App({
                       </button>
                     </div>
                     <p>
-                      Modul dedicat exclusiv sesizărilor urbane, integrat cu{' '}
+                      Modul dedicat exclusiv sesizărilor urbane (Categorie → Subcategorie), integrat cu{' '}
                       <a href={municipalReportsPortal} target="_blank" rel="noreferrer" style={{ textDecoration: 'underline' }}>
                         sesizari.primariatm.ro
                       </a>
@@ -2039,12 +2249,12 @@ export default function App({
                   </div>
                 </div>
               ) : sidebarTab === 'community' ? (
-                /* 5. COMUNITATE (Decuplată definitiv de Sesizări: doar Evenimente & Discuții) */
+                /* 5. COMUNITATE & EVENIMENTE OFICIALE (Decuplată definitiv de Sesizări) */
                 <Fragment>
                   <div className="panel-intro community-intro">
                     <div className="community-title-row">
                       <div>
-                        <span className="module-eyebrow">VIAȚA DE CARTIER</span>
+                        <span className="module-eyebrow">AGENDA CULTURALĂ & VIAȚA DE CARTIER</span>
                         <h1>Comunitate & Evenimente</h1>
                       </div>
                       <button
@@ -2056,7 +2266,7 @@ export default function App({
                       </button>
                     </div>
                     <p>
-                      Spațiu dedicat exclusiv inițiativelor civice, evenimentelor locale și discuțiilor dintre vecini (separat de modulul Sesizări).
+                      Evenimente culturale și municipale oficiale geolocalizate pe hartă, inițiative civice și discuții locale (fără sesizări).
                     </p>
                   </div>
 
@@ -2066,14 +2276,21 @@ export default function App({
                       className={communityFilter === 'all' ? 'active' : ''}
                       onClick={() => setCommunityFilter('all')}
                     >
-                      Toate ({communityPostPins.length})
+                      Toate ({communityPostPins.length + cityEventsFeed.events.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={communityFilter === 'official' ? 'active' : ''}
+                      onClick={() => setCommunityFilter('official')}
+                    >
+                      <Ticket size={13} /> Agenda Oficială ({cityEventsFeed.events.length})
                     </button>
                     <button
                       type="button"
                       className={`activity ${communityFilter === 'activity' ? 'active' : ''}`}
                       onClick={() => setCommunityFilter('activity')}
                     >
-                      <Calendar size={13} /> Evenimente
+                      <Calendar size={13} /> Activități ({communityPostPins.filter(p => p.type === 'activity').length})
                     </button>
                     <button
                       type="button"
@@ -2092,7 +2309,9 @@ export default function App({
                   </div>
 
                   <div className="results-heading">
-                    <span className="results-count">{visibleCommunityPins.length} postări</span>
+                    <span className="results-count">
+                      {visibleCityEvents.length} evenimente oficiale · {visibleCommunityPins.length} postări comunitate
+                    </span>
                     <div className="community-filter-controls">
                       <details className="list-options">
                         <summary>
@@ -2115,12 +2334,90 @@ export default function App({
                     </div>
                   </div>
 
-                  <div className="pin-list" role="region" aria-label="Postări Comunitate">
+                  <div className="pin-list" role="region" aria-label="Evenimente și Postări Comunitate">
+                    {/* Official Municipal & Cultural Events Geolocated on the Map */}
+                    {visibleCityEvents.map(ev => {
+                      const isSelected = selectedCityEvent?.id === ev.id;
+                      const startStr = dateLabel(ev.startsAt, { day: 'numeric', month: 'short', year: 'numeric' });
+                      const endStr = ev.endsAt
+                        ? dateLabel(ev.endsAt, { day: 'numeric', month: 'short', year: 'numeric' })
+                        : undefined;
+                      return (
+                        <article
+                          key={ev.id}
+                          className={`pin-card official-event-card ${isSelected ? 'is-selected' : ''}`}
+                        >
+                          <button
+                            type="button"
+                            className="card-main"
+                            onClick={() => setSelectedCityEvent(ev)}
+                          >
+                            <div className="card-top">
+                              <span className="type-label activity">
+                                <Ticket size={13} /> Eveniment Oficial
+                              </span>
+                              <span className="category-chip">{ev.category}</span>
+                              <span className="official-source-chip">{ev.source}</span>
+                            </div>
+                            <h3>{ev.title}</h3>
+                            <span className="place">
+                              <MapPin size={12} />
+                              {ev.venue} ({ev.lat.toFixed(4)}, {ev.lon.toFixed(4)})
+                            </span>
+                            <div className="card-date">
+                              <Calendar size={12} />
+                              {startStr}
+                              {endStr && endStr !== startStr ? ` – ${endStr}` : ''}
+                              {ev.timeLabel ? ` · ora ${ev.timeLabel}` : ''}
+                            </div>
+                          </button>
+                          <div className="card-footer">
+                            <button
+                              type="button"
+                              className="stop-route-btn"
+                              onClick={() =>
+                                startRouteToDestination({
+                                  location: { lon: ev.lon, lat: ev.lat },
+                                  title: `${ev.title} (${ev.venue})`,
+                                })
+                              }
+                            >
+                              <Navigation size={12} /> Navighează (A → B)
+                            </button>
+                            <div className="event-external-links">
+                              {ev.ticketsUrl && (
+                                <a
+                                  href={ev.ticketsUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="action-link"
+                                  style={{ width: 'auto', padding: 0 }}
+                                >
+                                  Bilete <ExternalLink size={12} />
+                                </a>
+                              )}
+                              <a
+                                href={ev.officialUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="action-link"
+                                style={{ width: 'auto', padding: 0 }}
+                              >
+                                Detalii <ExternalLink size={12} />
+                              </a>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
+
+                    {/* Citizen Community Activities & Discussions */}
                     {visibleCommunityPins.map(pin => renderPinCard(pin))}
-                    {visibleCommunityPins.length === 0 && (
+
+                    {visibleCityEvents.length === 0 && visibleCommunityPins.length === 0 && (
                       <div className="empty-state">
                         <Users size={28} />
-                        <h3>Nu există încă evenimente sau discuții</h3>
+                        <h3>Nu există evenimente sau discuții pe selecția curentă</h3>
                         <p>Fii primul care organizează o activitate sau deschide o discuție în cartierul tău.</p>
                         <div className="two-actions" style={{ width: '100%' }}>
                           <button type="button" className="primary" onClick={() => openCreateCommunity('activity')}>
@@ -2135,13 +2432,17 @@ export default function App({
                   </div>
                 </Fragment>
               ) : sidebarTab === 'places' ? (
-                /* 6. ORAȘ & STRATURI INTELIGENTE (Smart Layers) */
+                /* 6. ORAȘ & STRATURI INTELIGENTE (Smart Layers + BaseMap Style Switcher + Multi-POI Toggles) */
                 <PlacesPanel
                   places={filteredPlaces}
                   query={search}
                   setQuery={setSearch}
                   category={placeCategory}
                   setCategory={handleSelectSmartCategory}
+                  baseMapStyle={baseMapStyle}
+                  onChangeBaseMapStyle={setBaseMapStyle}
+                  enabledPoiKinds={enabledPoiKinds}
+                  onTogglePoiKind={handleTogglePoiKind}
                   error={layerErrors.places || ''}
                   retry={() => void ensureLayerData('places')}
                   select={place => {
@@ -2163,13 +2464,13 @@ export default function App({
                   share={place => setSharePlace(place)}
                 />
               ) : sidebarTab === 'route' ? (
-                /* 7. SISTEMUL DE RUTARE (Stil Google Maps: Punctul A + Punctul B + Swap Central) */
+                /* 7. SISTEMUL DE RUTARE (Punctul A + Opriri Intermediare Waypoints + Punctul B + Swap + Live GTFS-RT) */
                 <div className="route-planner google-maps-router">
                   <div className="panel-intro">
                     <span className="module-eyebrow">NAVIGARE URBANĂ TIMIȘOARA</span>
                     <h1>Planificator A ↔ B</h1>
                     <p>
-                      Alege modul de deplasare, setează Punctul A (Plecare) și Punctul B (Destinația) sau inversează ruta cu butonul central Swap.
+                      Alege modul de deplasare, setează Punctul A (Plecare), opriri intermediare opționale și Punctul B (Destinația) sau inversează ruta cu butonul Swap.
                     </p>
                   </div>
 
@@ -2186,11 +2487,16 @@ export default function App({
                         setPointAQuery(nextA.title);
                       }
                       const destPlace = stops[stops.length - 1];
+                      const midStops = stops
+                        .slice(0, -1)
+                        .map(s => ({ location: s.location, title: s.title }));
+                      setWaypoints(midStops);
+                      setWaypointQueries(midStops.map(s => s.title));
                       if (destPlace) {
                         const nextB = { location: destPlace.location, title: destPlace.title };
                         setPointB(nextB);
                         setPointBQuery(nextB.title);
-                        void calculateRouteBetween(nextA, nextB, nextMode);
+                        void calculateRouteBetween(nextA, nextB, nextMode, midStops);
                       }
                     }}
                   />
@@ -2201,7 +2507,7 @@ export default function App({
                       className={travelMode === 'transit' ? 'active' : ''}
                       onClick={() => {
                         setTravelMode('transit');
-                        if (pointB) void calculateRouteBetween(pointA, pointB, 'transit');
+                        if (pointB) void calculateRouteBetween(pointA, pointB, 'transit', waypoints);
                       }}
                     >
                       <span className="combined-transit-icon" aria-hidden="true">
@@ -2215,7 +2521,7 @@ export default function App({
                       className={travelMode === 'walking' ? 'active' : ''}
                       onClick={() => {
                         setTravelMode('walking');
-                        if (pointB) void calculateRouteBetween(pointA, pointB, 'walking');
+                        if (pointB) void calculateRouteBetween(pointA, pointB, 'walking', waypoints);
                       }}
                     >
                       <Footprints size={15} /> Pe jos
@@ -2225,7 +2531,7 @@ export default function App({
                       className={travelMode === 'cycling' ? 'active' : ''}
                       onClick={() => {
                         setTravelMode('cycling');
-                        if (pointB) void calculateRouteBetween(pointA, pointB, 'cycling');
+                        if (pointB) void calculateRouteBetween(pointA, pointB, 'cycling', waypoints);
                       }}
                     >
                       <Bike size={15} /> Bicicletă
@@ -2235,14 +2541,14 @@ export default function App({
                       className={travelMode === 'driving' ? 'active' : ''}
                       onClick={() => {
                         setTravelMode('driving');
-                        if (pointB) void calculateRouteBetween(pointA, pointB, 'driving');
+                        if (pointB) void calculateRouteBetween(pointA, pointB, 'driving', waypoints);
                       }}
                     >
                       <Car size={15} /> Mașină
                     </button>
                   </div>
 
-                  {/* Unified Google Maps-style A ↔ B Card with Central Swap Button */}
+                  {/* Unified Google Maps-style A ↔ Waypoints ↔ B Card with Central Swap Button */}
                   <div className="gmaps-route-box">
                     {/* Punctul A */}
                     <div className="gmaps-endpoint-row">
@@ -2287,7 +2593,7 @@ export default function App({
                             onClick={() => {
                               setPointA(s);
                               setPointAQuery(s.title);
-                              if (pointB) void calculateRouteBetween(s, pointB, travelMode);
+                              if (pointB) void calculateRouteBetween(s, pointB, travelMode, waypoints);
                             }}
                           >
                             <MapPin size={13} /> {s.title}
@@ -2296,9 +2602,85 @@ export default function App({
                       </div>
                     )}
 
-                    {/* Central Swap Button */}
+                    {/* Intermediate Waypoints (Opriri intermediare între A și B) */}
+                    {waypoints.map((wp, idx) => {
+                      const wpQuery = waypointQueries[idx] ?? wp.title;
+                      const wpNorm = normalizeSearch(wpQuery);
+                      const wpSuggestions =
+                        wpNorm.length >= 2 && wpQuery !== wp.title
+                          ? allRouteCandidates.filter(c => normalizeSearch(c.title).includes(wpNorm)).slice(0, 5)
+                          : [];
+                      const wpPickKey: PickTarget = `waypoint:${idx}`;
+                      return (
+                        <div key={`wp-${idx}`} className="waypoint-item-block">
+                          <div className="gmaps-endpoint-row waypoint-row">
+                            <span className="endpoint-badge waypoint-badge" aria-hidden="true">
+                              {idx + 1}
+                            </span>
+                            <div className="endpoint-input-wrap">
+                              <label htmlFor={`route-waypoint-${idx}`} className="sr-only">
+                                Oprire intermediară {idx + 1}
+                              </label>
+                              <input
+                                id={`route-waypoint-${idx}`}
+                                value={wpQuery}
+                                onChange={e => {
+                                  const next = [...waypointQueries];
+                                  next[idx] = e.target.value;
+                                  setWaypointQueries(next);
+                                }}
+                                placeholder={`Oprire intermediară ${idx + 1}…`}
+                              />
+                              <div className="endpoint-quick-btns">
+                                <button
+                                  type="button"
+                                  className={`icon-btn ${pickTarget === wpPickKey ? 'active' : ''}`}
+                                  title={`Alege oprirea ${idx + 1} pe hartă`}
+                                  aria-label={`Alege oprirea ${idx + 1} pe hartă`}
+                                  onClick={() => setPickTarget(wpPickKey)}
+                                >
+                                  <MapPin size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="icon-btn danger"
+                                  title={`Elimină oprirea ${idx + 1}`}
+                                  aria-label={`Elimină oprirea ${idx + 1}`}
+                                  onClick={() => removeWaypoint(idx)}
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          {wpSuggestions.length > 0 && (
+                            <div className="endpoint-suggestions">
+                              {wpSuggestions.map(s => (
+                                <button
+                                  type="button"
+                                  key={`wp-${idx}-${s.title}`}
+                                  onClick={() => updateWaypoint(idx, s)}
+                                >
+                                  <MapPin size={13} /> {s.title}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Central Controls: Add Waypoint + Swap A ↔ B */}
                     <div className="gmaps-swap-divider">
-                      <span className="divider-line" />
+                      <button
+                        type="button"
+                        className="add-waypoint-btn"
+                        onClick={addWaypoint}
+                        title="Adaugă o oprire intermediară între A și B"
+                      >
+                        <Plus size={14} />
+                        <span>Adaugă oprire ({waypoints.length}/5)</span>
+                      </button>
                       <button
                         type="button"
                         className="route-swap-btn"
@@ -2309,7 +2691,6 @@ export default function App({
                         <ArrowUpDown size={15} />
                         <span>Inversează A ↔ B</span>
                       </button>
-                      <span className="divider-line" />
                     </div>
 
                     {/* Punctul B */}
@@ -2362,7 +2743,7 @@ export default function App({
                             onClick={() => {
                               setPointB(s);
                               setPointBQuery(s.title);
-                              void calculateRouteBetween(pointA, s, travelMode);
+                              void calculateRouteBetween(pointA, s, travelMode, waypoints);
                             }}
                           >
                             <MapPin size={13} /> {s.title}
@@ -2377,10 +2758,11 @@ export default function App({
                       type="button"
                       className="primary full"
                       disabled={!pointB || routeBusy}
-                      onClick={() => void calculateRouteBetween(pointA, pointB, travelMode)}
+                      onClick={() => void calculateRouteBetween(pointA, pointB, travelMode, waypoints)}
                     >
                       {routeBusy ? <span className="spinner" /> : <Navigation size={16} />}
                       Calculează ruta A → B
+                      {waypoints.length > 0 ? ` (${waypoints.length} opriri)` : ''}
                     </button>
                   </div>
 
@@ -2395,7 +2777,14 @@ export default function App({
                         </strong>
                       </div>
                       <p>
-                        <strong>A:</strong> {pointA.title} → <strong>B:</strong> {pointB?.title}
+                        <strong>A:</strong> {pointA.title}
+                        {waypoints.map((w, i) => (
+                          <span key={`res-wp-${i}`}>
+                            {' '}
+                            → <strong>{i + 1}:</strong> {w.title}
+                          </span>
+                        ))}{' '}
+                        → <strong>B:</strong> {pointB?.title}
                       </p>
                       <div className="route-result-actions">
                         <button
@@ -2418,6 +2807,8 @@ export default function App({
                       selected={transitRoute.selected}
                       validFrom={transitRoute.validFrom}
                       validTo={transitRoute.validTo}
+                      liveVehicles={stptFeed.vehicles}
+                      onSelectVehicle={selectVehicle}
                       select={index => setTransitRoute(current => current && { ...current, selected: index })}
                     />
                   )}
@@ -2579,6 +2970,7 @@ export default function App({
                   sidebarTab === 'route'
                     ? [
                         { location: pointA.location, title: pointA.title },
+                        ...waypoints.map(wp => ({ location: wp.location, title: wp.title })),
                         ...(pointB
                           ? [{ location: pointB.location, title: pointB.title, destination: true }]
                           : []),
@@ -2602,10 +2994,19 @@ export default function App({
                   if (v) selectVehicle(v);
                 }}
                 activeLineRoute={activeLineRoute}
+                networkSubFilters={
+                  sidebarTab === 'transport' && showAllTransportRoutes ? networkSubFilters : undefined
+                }
                 veloStations={sidebarTab === 'velo' ? veloFeed.stations : []}
                 selectedVeloStation={sidebarTab === 'velo' ? selectedVeloStation : null}
                 onSelectVeloStation={station => {
                   setSelectedVeloStation(station);
+                  setMobilePanelOpen(true);
+                }}
+                cityEvents={sidebarTab === 'community' ? visibleCityEvents : []}
+                selectedCityEvent={sidebarTab === 'community' ? selectedCityEvent : null}
+                onSelectCityEvent={ev => {
+                  setSelectedCityEvent(ev);
                   setMobilePanelOpen(true);
                 }}
                 municipalReports={mapMunicipalReports}
@@ -2617,6 +3018,7 @@ export default function App({
                 visibility={layers}
                 labels={pinLabels}
                 buildings={showBuildings}
+                baseMapStyle={baseMapStyle}
                 focusedPlace={sidebarTab === 'places' ? selectedPlace || undefined : undefined}
                 onInspectPlace={place => {
                   switchModule('places');
@@ -2626,7 +3028,7 @@ export default function App({
               />
             </Suspense>
 
-            {/* Contextual Module Badge on Map */}
+            {/* Contextual Module Badge & Base Map Style Quick Switcher */}
             <div className="map-context-pill">
               <Layers size={13} />
               <span>
@@ -2643,9 +3045,9 @@ export default function App({
                         : sidebarTab === 'reports'
                           ? 'Sesizări Cetățenești & PMT'
                           : sidebarTab === 'community'
-                            ? 'Comunitate & Evenimente'
+                            ? `Comunitate & Agenda (${visibleCityEvents.length} evenimente)`
                             : sidebarTab === 'places'
-                              ? 'Straturi Inteligente Oraș'
+                              ? `Straturi Oraș (${baseMapStyle === 'satellite' ? 'Satelit' : baseMapStyle === 'buildings3d' ? 'Clădiri 3D' : 'Minimal'})`
                               : 'Navigare A ↔ B'}
                 </strong>
               </span>
@@ -2679,7 +3081,9 @@ export default function App({
                       ? 'Atinge harta pentru a fixa locația'
                       : pickTarget === 'pointA'
                         ? 'Atinge harta pentru Punctul A (Plecare)'
-                        : 'Atinge harta pentru Punctul B (Destinație)'}
+                        : pickTarget === 'pointB'
+                          ? 'Atinge harta pentru Punctul B (Destinație)'
+                          : `Atinge harta pentru oprirea intermediară ${Number(pickTarget.split(':')[1]) + 1}`}
                   </strong>
                   <span>Coordonatele vor fi preluate automat.</span>
                 </div>
@@ -2835,18 +3239,41 @@ export default function App({
                 </label>
 
                 <label className="field">
-                  Categorie
+                  {form.type === 'report' ? 'Pasul 1 · Categorie principală' : 'Categorie'}
                   <select
                     value={form.category}
-                    onChange={e => setForm({ ...form, category: e.target.value })}
+                    onChange={e => {
+                      const nextCat = e.target.value;
+                      const nextSub =
+                        form.type === 'report' ? reportSubcategories[nextCat]?.[0] : undefined;
+                      setForm({ ...form, category: nextCat, subcategory: nextSub });
+                    }}
                   >
                     {meta[form.type].categories.map(c => (
-                      <option key={c}>{c}</option>
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
                     ))}
                   </select>
                 </label>
 
-                <label className="field">
+                {form.type === 'report' && (
+                  <label className="field">
+                    Pasul 2 · Subcategorie specifică
+                    <select
+                      value={form.subcategory || reportSubcategories[form.category]?.[0] || ''}
+                      onChange={e => setForm({ ...form, subcategory: e.target.value })}
+                    >
+                      {(reportSubcategories[form.category] || []).map(sub => (
+                        <option key={sub} value={sub}>
+                          {sub}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                <label className={`field ${form.type === 'report' ? 'full-width' : ''}`}>
                   Zonă sau reper
                   <input
                     required
@@ -2857,7 +3284,7 @@ export default function App({
                 </label>
 
                 <div className="field full-width">
-                  <span>Locație pe hartă</span>
+                  <span>Locație pe hartă (Coordonate GPS)</span>
                   <div className="location-field">
                     <div className="location-summary">
                       <MapPin size={16} />
@@ -2985,7 +3412,7 @@ export default function App({
         </div>
       )}
 
-      {/* User Account Modal (Production profile switcher without demo mocks) */}
+      {/* User Account Modal (Supabase + Google OAuth Login & Session Management) */}
       {modal === 'profile' && (
         <div className="modal-backdrop" role="presentation" onClick={() => setModal(null)}>
           <div
@@ -2999,8 +3426,8 @@ export default function App({
           >
             <div className="modal-header">
               <div>
-                <span className="eyebrow">CONT UTILIZATOR</span>
-                <h2 id="profile-title">Profil Cetățean</h2>
+                <span className="eyebrow">AUTENTIFICARE & SESIUNE</span>
+                <h2 id="profile-title">Cont Cetățean Urban Conect</h2>
               </div>
               <button
                 type="button"
@@ -3014,28 +3441,13 @@ export default function App({
             {cloud?.account ? (
               cloud.account
             ) : (
-              <div className="profile-options">
-                {allPeople.map(p => (
-                  <button
-                    type="button"
-                    key={p.id}
-                    className={p.id === user.id ? 'chosen' : ''}
-                    onClick={() => {
-                      setUserId(p.id);
-                      localStorage.setItem('vecin-user', p.id);
-                      setModal(null);
-                    }}
-                  >
-                    <span className="avatar" style={{ background: p.color }}>
-                      {p.initials}
-                    </span>
-                    <span>
-                      <strong>{p.name}</strong>
-                      <small>Cont verificat · Timișoara</small>
-                    </span>
-                    {p.id === user.id && <CheckCircle2 size={18} />}
-                  </button>
-                ))}
+              <div className="cloud-account">
+                <div className="authenticated-profile-card">
+                  <div>
+                    <strong>{user.name}</strong>
+                    <p>Sesiune activă · Timișoara</p>
+                  </div>
+                </div>
               </div>
             )}
           </div>

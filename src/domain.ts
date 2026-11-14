@@ -11,6 +11,7 @@ export const people: Person[] = [
 ];
 export type Pin = {
   id: string; type: PinType; title: string; description: string; category: string;
+  subcategory?: string;
   location: Point; place: string; authorId: string; createdAt: string;
   image?: string; demo?: boolean; deleted?: boolean;
   status: 'open' | 'resolved' | 'active' | 'cancelled';
@@ -22,6 +23,41 @@ export type Pin = {
 export type Message = { id: string; pinId: string; authorId: string; body: string; createdAt: string };
 export type State = { version: 1; pins: Pin[]; messages: Message[]; saved: Record<string, string[]>; flags: { pinId: string; userId: string; reason: string }[]; people?: Person[] };
 export const center: Point = { lon: 21.2257, lat: 45.7557 };
+export const reportSubcategories: Record<string, string[]> = {
+  'Infrastructură': [
+    'Gropi / Carosabil deteriorat',
+    'Trotuare / Borduri',
+    'Semnalizare rutieră / Semafoare',
+    'Șantiere și lucrări',
+    'Rețele edilitare / Capac canal',
+  ],
+  'Curățenie': [
+    'Depozitare ilegală deșeuri',
+    'Coșuri stradale pline / deteriorate',
+    'Salubrizare stradală',
+    'Vehicule abandonate',
+    'Graffiti / Vandalism',
+  ],
+  'Spații verzi': [
+    'Arbori periculoși / Toaletare',
+    'Întreținere parcuri și scuaruri',
+    'Locuri de joacă deteriorate',
+    'Ambrozie / Vegetație neîngrijită',
+    'Mobilier urban în parcuri',
+  ],
+  'Iluminat': [
+    'Stâlp / Corp iluminat nefuncțional',
+    'Cablu electric expus / Pericol',
+    'Iluminat trecere de pietoni',
+    'Iluminat arhitectural / Parc',
+  ],
+  'Accesibilitate': [
+    'Trotuar blocat / Parcare neregulamentară',
+    'Rampă persoane cu dizabilități',
+    'Stație transport public STPT inaccesibilă',
+    'Pistă de biciclete blocată / deteriorată',
+  ],
+};
 export const meta = {
   report: {
     label: 'Sesizare',
@@ -33,11 +69,6 @@ export const meta = {
       'Spații verzi',
       'Iluminat',
       'Accesibilitate',
-      'Străzi și trotuare',
-      'Parcări neregulamentare',
-      'Transport public STPT',
-      'Șantiere și lucrări',
-      'Semnalizare rutieră',
     ],
   },
   activity: { label: 'Activitate', plural: 'Activități', color: '#059669', categories: ['Voluntariat', 'Sport', 'Social', 'Cultură'] },
@@ -51,12 +82,20 @@ export const formSchema = z.object({
   type: z.enum(['report', 'activity', 'discussion']),
   title: z.string().trim().min(5, 'Titlul trebuie să aibă cel puțin 5 caractere.').max(100, 'Titlul poate avea maximum 100 de caractere.'),
   description: z.string().trim().min(10, 'Adaugă o descriere de cel puțin 10 caractere.').max(2000),
-  category: z.string().min(1), place: z.string().trim().max(100),
+  category: z.string().min(1),
+  subcategory: z.string().trim().max(120).optional(),
+  place: z.string().trim().max(100),
   location: pointSchema,
   image: z.string().optional(), startsAt: z.string().optional(), endsAt: z.string().optional(),
   capacity: z.number().int().min(1).max(500).optional(), relatedId: z.string().optional(),
 }).superRefine((value, ctx) => {
   if (!meta[value.type].categories.includes(value.category)) ctx.addIssue({ code: 'custom', path: ['category'], message: 'Alege o categorie validă.' });
+  if (value.type === 'report' && value.subcategory) {
+    const allowedSubs = reportSubcategories[value.category] ?? [];
+    if (!allowedSubs.includes(value.subcategory)) {
+      ctx.addIssue({ code: 'custom', path: ['subcategory'], message: 'Alege o subcategorie validă pentru categoria selectată.' });
+    }
+  }
   if (value.type === 'report' && !value.image) ctx.addIssue({ code: 'custom', path: ['image'], message: 'Adaugă o fotografie pentru sesizare.' });
   if (value.type === 'activity') {
     const start = Date.parse(value.startsAt || ''); const end = Date.parse(value.endsAt || '');

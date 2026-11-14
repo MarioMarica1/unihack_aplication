@@ -4,10 +4,12 @@ import type { Connect, Plugin } from 'vite';
 import { municipalReportDetailResponse, municipalReportsResponse } from './server/municipal-reports.ts';
 import { stptVehiclesResponse } from './server/stpt-live.ts';
 import { veloStationsResponse } from './server/velo-live.ts';
+import { cityEventsResponse } from './server/city-events.ts';
 import { routeChatResponse } from './server/route-chat.ts';
 import { municipalReportDetailPath, municipalReportsPath } from './src/municipal-reports.ts';
 import { stptVehiclesPath } from './src/stpt-live.ts';
 import { veloStationsPath } from './src/velo-live.ts';
+import { cityEventsPath } from './src/city-events.ts';
 
 function urbanConectApi(geminiKey?: string): Plugin {
   const middleware: Connect.NextHandleFunction = (request, response, next) => {
@@ -40,6 +42,14 @@ function urbanConectApi(geminiKey?: string): Plugin {
 
     if (url.pathname === veloStationsPath) {
       void veloStationsResponse().then(async result => {
+        response.writeHead(result.status, Object.fromEntries(result.headers));
+        response.end(await result.text());
+      }).catch(next);
+      return;
+    }
+
+    if (url.pathname === cityEventsPath) {
+      void cityEventsResponse().then(async result => {
         response.writeHead(result.status, Object.fromEntries(result.headers));
         response.end(await result.text());
       }).catch(next);

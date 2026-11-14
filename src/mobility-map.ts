@@ -15,6 +15,8 @@ const lineGroups = [
   ['tramways', 'mobility-tram-lines', 4],
 ] as const;
 
+const TROLLEYBUS_REFS = new Set(['11', '13', '14', '15', '16', '17', '18', 'M11', 'M14']);
+
 const tramLabels = 'mobility-tram-labels';
 export const liveVehiclesLayerId = 'stpt-live-vehicles';
 export const liveVehiclesArrowLayerId = 'stpt-live-vehicles-arrow';
@@ -29,6 +31,12 @@ const activeLineLayerIds = [
 ] as const;
 const busLabels = 'mobility-bus-labels';
 const casing = '#0f172a';
+
+export type NetworkSubFilters = {
+  tram: boolean;
+  trolleybus: boolean;
+  bus: boolean;
+};
 
 export type ActiveLineRoute = {
   line: string;
@@ -64,7 +72,12 @@ const tramColor: DataDrivenPropertyValueSpecification<string> = [
   layerDefinitions.tramways.color,
 ];
 
-export function addMobilityLines(map: Map, infrastructure: Partial<Infrastructure>, visibility: LayerVisibility) {
+export function addMobilityLines(
+  map: Map,
+  infrastructure: Partial<Infrastructure>,
+  visibility: LayerVisibility,
+  subFilters?: NetworkSubFilters,
+) {
   const interactive: string[] = [];
   for (const [key, id, width] of lineGroups) {
     const data = infrastructure[key];
@@ -76,8 +89,9 @@ export function addMobilityLines(map: Map, infrastructure: Partial<Infrastructur
         const p = feature.properties;
         const refs = String(p?.ref || p?.routeRefs || '').split(/[,;•]/).map(normalizeLine).filter(Boolean);
         const ref = refs[0] ?? '';
-        return { ...feature, properties: { ...p, ref, mapLabel: refs.length
-          ? `${p?.routeType === 'trolleybus' ? 'Troleibuz' : 'Autobuz'} ${refs.join(' • ')}` : '' } };
+        const isTrolley = p?.routeType === 'trolleybus' || p?.route === 'trolleybus' || refs.some(r => TROLLEYBUS_REFS.has(r));
+        return { ...feature, properties: { ...p, ref, isTrolleybus: isTrolley, mapLabel: refs.length
+          ? `${isTrolley ? 'Troleibuz' : 'Autobuz'} ${refs.join(' • ')}` : '' } };
       }) } : data;
       map.addSource(id, { type: 'geojson', data: isTram ? withTramLabels(data) : normalized });
     }
@@ -89,42 +103,73 @@ export function addMobilityLines(map: Map, infrastructure: Partial<Infrastructur
         ...rest.flatMap(ref => [ref, busLineColor(ref)]), layerDefinitions.busways.color];
     }
 
-    const solid: FilterSpecification = isTram ? ['!', ['has', 'labelOnly']] : ['!=', ['get', 'kind'], 'road-tag'];
+    const busModeCondition: FilterSpecification | null = isBus && subFilters
+      ? subFilters.trolleybus && !subFilters.bus
+        ? ['==', ['get', 'isTrolleybus'], true]
+        : !subFilters.trolleybus && subFilters.bus
+          ? ['==', ['get', 'isTrolleybus'], false]
+          : null
+      : null;
+
+    const baseSolid: FilterSpecification = isTram ? ['!', ['has', 'labelOnly']] : ['!=', ['get', 'kind'], 'road-tag'];
+    const solid: FilterSpecification = busModeCondition ? ['all', baseSolid, busModeCondition] : baseSolid;
+    const baseTag: FilterSpecification = ['==', ['get', 'kind'], 'road-tag'];
+    const tagFilter: FilterSpecification = busModeCondition ? ['all', baseTag, busModeCondition] : baseTag;
+
     const groups = isTram ? [[id, solid, false] as const] : [
       [id, solid, false] as const,
-      [`${id}-tag`, ['==', ['get', 'kind'], 'road-tag'] as FilterSpecification, true] as const,
+      [`${id}-tag`, tagFilter, true] as const,
     ];
+
+    const isLayerVisible = isTram
+      ? Boolean(visibility.tramways && (!subFilters || subFilters.tram))
+      : isBus
+        ? Boolean(visibility.busways && (!subFilters || subFilters.trolleybus || subFilters.bus))
+        : Boolean(visibility[key]);
+
     for (const [layerId, filter, dashed] of groups) {
       for (const outline of [true, false]) {
         const name = outline ? `${layerId}-casing` : layerId;
-        if (!map.getLayer(name)) map.addLayer({
-          id: name, source: id, type: 'line', filter,
-          layout: { 'line-cap': dashed ? 'butt' : 'round', 'line-join': 'round' },
-          paint: {
-            'line-color': outline ? casing : color,
-            'line-width': width + (outline ? 2 : 0), 'line-opacity': .95,
-            ...(dashed ? { 'line-dasharray': outline ? [1.5, 1.5] : [2.5, 2.5] } : {}),
-          },
-        });
-        map.setLayoutProperty(name, 'visibility', visibility[key] ? 'visible' : 'none');
+        if (!map.getLayer(name)) {
+          map.addLayer({
+            id: name, source: id, type: 'line', filter,
+            layout: { 'line-cap': dashed ? 'butt' : 'round', 'line-join': 'round' },
+            paint: {
+              'line-color': outline ? casing : color,
+              'line-width': width + (outline ? 2 : 0), 'line-opacity': .95,
+              ...(dashed ? { 'line-dasharray': outline ? [1.5, 1.5] : [2.5, 2.5] } : {}),
+            },
+          });
+        } else {
+          map.setFilter(name, filter);
+        }
+        map.setLayoutProperty(name, 'visibility', isLayerVisible ? 'visible' : 'none');
       }
       interactive.push(layerId);
     }
 
     if (isTram || isBus) {
       const labels = isTram ? tramLabels : busLabels;
-      if (!map.getLayer(labels)) map.addLayer({
-        id: labels, source: id, type: 'symbol',
-        filter: isTram ? ['has', 'labelOnly'] : ['!=', ['get', 'mapLabel'], ''], minzoom: isTram ? 12 : 13,
-        layout: {
-          'symbol-placement': 'line', 'symbol-spacing': isTram ? 180 : 220,
-          'text-field': ['get', isTram ? 'lines_label' : 'mapLabel'],
-          'text-size': 12, 'text-font': ['Noto Sans Bold'], 'text-keep-upright': true,
-          'text-allow-overlap': false, 'text-padding': 5,
-        },
-        paint: { 'text-color': '#ffffff', 'text-halo-color': casing, 'text-halo-width': 2 },
-      });
-      map.setLayoutProperty(labels, 'visibility', visibility[key] ? 'visible' : 'none');
+      const baseLabelFilter: FilterSpecification = isTram ? ['has', 'labelOnly'] : ['!=', ['get', 'mapLabel'], ''];
+      const labelFilter: FilterSpecification = (!isTram && busModeCondition)
+        ? ['all', baseLabelFilter, busModeCondition]
+        : baseLabelFilter;
+      if (!map.getLayer(labels)) {
+        map.addLayer({
+          id: labels, source: id, type: 'symbol',
+          filter: labelFilter, minzoom: isTram ? 12 : 13,
+          layout: {
+            'symbol-placement': 'line', 'symbol-spacing': isTram ? 180 : 220,
+            'text-field': ['get', isTram ? 'lines_label' : 'mapLabel'],
+            'text-size': 12, 'text-font': ['Noto Sans Bold'], 'text-keep-upright': true,
+            'text-allow-overlap': false, 'text-padding': 5,
+          },
+          paint: { 'text-color': '#ffffff', 'text-halo-color': casing, 'text-halo-width': 2 },
+        });
+      } else {
+        map.setFilter(labels, labelFilter);
+      }
+      map.setLayoutProperty(labels, 'visibility', isLayerVisible ? 'visible' : 'none');
     }
   }
   return interactive;

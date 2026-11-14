@@ -21,7 +21,7 @@ describe('municipal reports', () => {
     expect(reports[0].coordinates).toBeUndefined();
   });
 
-  it('includes all 5 official statuses, description, and CloudFront photo URL when includeAllStatuses is true', () => {
+  it('includes all 5 official statuses, description, and CloudFront photo URLs when includeAllStatuses is true', () => {
     const now = Date.parse('2026-11-14T12:00:00Z');
     const reports = normalizeMunicipalReports([
       {
@@ -29,7 +29,7 @@ describe('municipal reports', () => {
         status: 'Finalizata',
         createdAt: new Date(now - 5000).toISOString(),
         descriere: 'Intervenție finalizată pe carosabil.',
-        files: [{ path: 'sesizari/2026/photo1.jpg' }],
+        files: [{ path: 'sesizari/2026/photo1.jpg' }, { path: 'sesizari/2026/photo2.jpg' }, { path: '' }],
       },
       {
         webconInstanceNr: 'SZN2026-11',
@@ -41,6 +41,11 @@ describe('municipal reports', () => {
     expect(reports[0].status).toBe('Finalizata');
     expect(reports[0].description).toBe('Intervenție finalizată pe carosabil.');
     expect(reports[0].photoUrl).toBe('https://d6r4wmx5epyg3.cloudfront.net/sesizari/2026/photo1.jpg');
+    expect(reports[0].photoUrls).toEqual([
+      'https://d6r4wmx5epyg3.cloudfront.net/sesizari/2026/photo1.jpg',
+      'https://d6r4wmx5epyg3.cloudfront.net/sesizari/2026/photo2.jpg',
+    ]);
+    expect(reports[1].photoUrls).toBeUndefined();
   });
 
   it('lets only the author set and clear the community report marker', () => {

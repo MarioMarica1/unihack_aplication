@@ -21,6 +21,7 @@ import type { Infrastructure, MapPlace } from './infrastructure';
 import type { BaseMapStyle } from './map-style';
 import { buildPlaceCatalog, filterPlaces } from './place-catalog';
 import { PlaceIcon } from './place-icons';
+import { PlaceCardThumb, PlacePhotoHero } from './PlaceMedia';
 export { normalizeSearch } from './place-catalog';
 
 const categories = [
@@ -134,8 +135,11 @@ export default function PlacesPanel({
           <ArrowLeft size={17} />
           {detailsInLayers ? 'Înapoi la straturi' : 'Înapoi la catalogul orașului'}
         </button>
-        <span className="place-detail-icon"><PlaceIcon kind={selected.kind} size={30} /></span>
-        <h1>{selected.title}</h1>
+        <PlacePhotoHero place={selected} />
+        <div className="place-detail-title-row">
+          <span className="place-detail-icon"><PlaceIcon kind={selected.kind} size={26} /></span>
+          <h1>{selected.title}</h1>
+        </div>
         <p className="place-category">{placeKindLabel[selected.kind || ''] || 'Loc pe hartă'}</p>
         {selected.description && <p className="place-address">{selected.description}</p>}
         {source?.properties?.street && (
@@ -370,7 +374,7 @@ export default function PlacesPanel({
               return (
                 <div className="place-result-row" key={place.id}>
                   <button className="place-result" onClick={() => select(place)}>
-                    <span className={`place-result-symbol ${place.kind || ''}`}><PlaceIcon kind={place.kind} /></span>
+                    <PlaceCardThumb place={place} icon={<PlaceIcon kind={place.kind} size={13} />} />
                     <span>
                       <strong>{place.title}</strong>
                       <small>{placeKindLabel[props.kind] || 'Loc'}{props.street ? ` · ${props.street}` : ''}</small>

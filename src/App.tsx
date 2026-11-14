@@ -9,6 +9,7 @@ import {
   Building2,
   Bus,
   Calendar,
+  Camera,
   Car,
   CheckCircle2,
   Compass,
@@ -69,6 +70,7 @@ import { municipalReportsPortal, municipalReportUrl, municipalStatuses } from '.
 import type { MunicipalStatus } from './municipal-reports';
 import { useMunicipalReportDetail, useMunicipalReports } from './useMunicipalReports';
 import VehicleDetailPanel from './VehicleDetailPanel';
+import { MunicipalReportVisual } from './PlaceMedia';
 import { TransportPanel } from './TransportPanel';
 import { VeloPanel } from './VeloPanel';
 import { NewsFeedPanel } from './NewsFeedPanel';
@@ -252,6 +254,7 @@ export default function App({
   const [reportsStatusFilter, setReportsStatusFilter] = useState<'all' | MunicipalStatus>('all');
   const [reportsCategoryFilter, setReportsCategoryFilter] = useState<string>('all');
   const [reportsSubcategoryFilter, setReportsSubcategoryFilter] = useState<string>('all');
+  const [reportsOnlyWithPhoto, setReportsOnlyWithPhoto] = useState(false);
   const [reportsVisibleLimit, setReportsVisibleLimit] = useState<number>(80);
 
   // News Feed Temporal Filter (Zilnic, Săptămânal, Lunar)
@@ -399,6 +402,7 @@ export default function App({
     setPlacesSearch('');
     setCommunityFilter('all');
     setCommunityEventCategory('all');
+    setReportsOnlyWithPhoto(false);
 
     // Reset all previous module selections so the map context is completely isolated
     setSelectedPinId('');
@@ -726,14 +730,25 @@ export default function App({
     const q = normalizeSearch(search);
     return citizenReportPins
       .filter(() => reportsSourceFilter !== 'municipal')
+      .filter(p => !reportsOnlyWithPhoto || Boolean(p.image))
       .filter(p => !q || normalizeSearch(`${p.title} ${p.description} ${p.category} ${p.subcategory ?? ''} ${p.place}`).includes(q))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [citizenReportPins, reportsSourceFilter, search]);
+  }, [citizenReportPins, reportsSourceFilter, reportsOnlyWithPhoto, search]);
 
   const municipalSourceList = useMemo(
     () => (municipalFeed.allReports.length ? municipalFeed.allReports : municipalFeed.reports),
     [municipalFeed.allReports, municipalFeed.reports],
   );
+
+  const reportsWithPhotoCount = useMemo(() => {
+    const pmtCount =
+      reportsSourceFilter === 'citizen'
+        ? 0
+        : municipalSourceList.filter(r => Boolean(r.photoUrl || (r.photoUrls && r.photoUrls.length > 0))).length;
+    const citizenCount =
+      reportsSourceFilter === 'municipal' ? 0 : citizenReportPins.filter(p => Boolean(p.image)).length;
+    return pmtCount + citizenCount;
+  }, [municipalSourceList, citizenReportPins, reportsSourceFilter]);
 
   const availableMunicipalCategories = useMemo(() => {
     const counts = new Map<string, number>();
@@ -760,6 +775,7 @@ export default function App({
     if (reportsSourceFilter === 'citizen') return [];
     const q = normalizeSearch(search);
     return municipalSourceList.filter(report => {
+      if (reportsOnlyWithPhoto && !report.photoUrl && !(report.photoUrls && report.photoUrls.length > 0)) return false;
       if (reportsStatusFilter !== 'all' && report.status !== reportsStatusFilter) return false;
       if (reportsCategoryFilter !== 'all' && report.category !== reportsCategoryFilter) return false;
       if (reportsSubcategoryFilter !== 'all' && report.title !== reportsSubcategoryFilter) return false;
@@ -772,6 +788,7 @@ export default function App({
   }, [
     municipalSourceList,
     reportsSourceFilter,
+    reportsOnlyWithPhoto,
     reportsStatusFilter,
     reportsCategoryFilter,
     reportsSubcategoryFilter,
@@ -1424,6 +1441,11 @@ export default function App({
               {dateLabel(pin.startsAt!)} · {activityState(pin)}
             </div>
           )}
+          {pin.image && (
+            <div className="report-card-thumb-wrap">
+              <img src={pin.image} alt={pin.title} className="report-card-thumb" loading="lazy" />
+            </div>
+          )}
           <p className="card-description">{pin.description}</p>
         </button>
         <div className="card-footer">
@@ -1946,12 +1968,10 @@ export default function App({
                     </div>
                   </div>
                   <div className="detail-scroll">
-                    {selectedMunicipal.photoUrl && (
-                      <div className="detail-image">
-                        <img src={selectedMunicipal.photoUrl} alt={selectedMunicipal.title} loading="lazy" />
-                        <span>FOTOGRAFIE OFICIALĂ SESIZARE PMT</span>
-                      </div>
-                    )}
+                    <MunicipalReportVisual
+                      report={selectedMunicipal}
+                      detail={municipalDetail ?? undefined}
+                    />
                     <div className="detail-content">
                       <div className="detail-badges">
                         <span className="official-badge">
@@ -2576,6 +2596,21 @@ export default function App({
                     </button>
                   </div>
 
+                  <div className="reports-photo-filter-row">
+                    <button
+                      type="button"
+                      className={`reports-photo-chip ${reportsOnlyWithPhoto ? 'active' : ''}`}
+                      aria-pressed={reportsOnlyWithPhoto}
+                      onClick={() => {
+                        setReportsOnlyWithPhoto(prev => !prev);
+                        setReportsVisibleLimit(80);
+                        setMapFit(v => v + 1);
+                      }}
+                    >
+                      <Camera size={13} /> Cu fotografie ({reportsWithPhotoCount})
+                    </button>
+                  </div>
+
                   {reportsSourceFilter !== 'citizen' && (
                     <div className="reports-filters-grid">
                       <label className="compact-select-field">
@@ -2654,7 +2689,8 @@ export default function App({
 
                   {(reportsStatusFilter !== 'all' ||
                     reportsCategoryFilter !== 'all' ||
-                    reportsSubcategoryFilter !== 'all') && (
+                    reportsSubcategoryFilter !== 'all' ||
+                    reportsOnlyWithPhoto) && (
                     <div className="results-heading" style={{ padding: '4px 16px 8px' }}>
                       <span className="results-count">
                         Rezultate filtrate: <strong>{visibleMunicipalReports.length}</strong> sesizări PMT
@@ -2666,6 +2702,7 @@ export default function App({
                           setReportsStatusFilter('all');
                           setReportsCategoryFilter('all');
                           setReportsSubcategoryFilter('all');
+                          setReportsOnlyWithPhoto(false);
                           setReportsVisibleLimit(80);
                           setMapFit(v => v + 1);
                         }}
@@ -2703,6 +2740,14 @@ export default function App({
                               <MapPin size={12} />
                               {r.category} · {r.number} · {dateLabel(r.createdAt)}
                             </span>
+                            {r.photoUrl && (
+                              <div className="report-card-thumb-wrap">
+                                <img src={r.photoUrl} alt={r.title} className="report-card-thumb" loading="lazy" />
+                                {(r.photoUrls?.length ?? 0) > 1 && (
+                                  <span className="report-card-photo-count">+{r.photoUrls!.length - 1} foto</span>
+                                )}
+                              </div>
+                            )}
                             {r.description && <p className="card-description">{r.description}</p>}
                           </button>
                           <div className="card-footer">

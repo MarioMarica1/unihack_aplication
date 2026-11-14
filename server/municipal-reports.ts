@@ -8,6 +8,14 @@ const detailCache = new Map<string, { until: number; detail: Promise<MunicipalRe
 const activeStatuses = new Set<string>(['Inregistrata', 'In lucru']);
 const knownStatuses = new Set<string>(Object.keys(municipalStatuses));
 
+function extractCloudfrontPhotos(files: unknown): string[] {
+  if (!Array.isArray(files)) return [];
+  return files
+    .map((f: { path?: unknown }) => (typeof f?.path === 'string' && f.path.trim() ? f.path.trim() : null))
+    .filter((p): p is string => Boolean(p))
+    .map(path => `https://d6r4wmx5epyg3.cloudfront.net/${path}`);
+}
+
 export function normalizeMunicipalReports(data: unknown, now = Date.now(), includeAllStatuses = false): MunicipalReport[] {
   if (!Array.isArray(data)) throw new Error('Invalid municipal feed');
   const reports = new Map<string, MunicipalReport>();
@@ -25,8 +33,8 @@ export function normalizeMunicipalReports(data: unknown, now = Date.now(), inclu
     const category = typeof item.categorii?.nume === 'string' ? item.categorii.nume.trim() : '';
     const subcat = typeof item.subcategorii?.nume === 'string' ? item.subcategorii.nume.trim() : '';
     const description = typeof item.descriere === 'string' && item.descriere.trim() ? item.descriere.trim() : undefined;
-    const firstFile = Array.isArray(item.files) ? item.files.find((f: { path?: unknown }) => typeof f?.path === 'string' && f.path.trim()) : undefined;
-    const photoUrl = firstFile?.path ? `https://d6r4wmx5epyg3.cloudfront.net/${firstFile.path}` : undefined;
+    const photoUrls = extractCloudfrontPhotos(item.files);
+    const photoUrl = photoUrls[0];
     const report: MunicipalReport = {
       number: item.webconInstanceNr,
       status: item.status as MunicipalStatus,
@@ -37,6 +45,7 @@ export function normalizeMunicipalReports(data: unknown, now = Date.now(), inclu
     };
     if (description) report.description = description;
     if (photoUrl) report.photoUrl = photoUrl;
+    if (photoUrls.length > 0) report.photoUrls = photoUrls;
     reports.set(item.webconInstanceNr, report);
   }
   return [...reports.values()];
@@ -83,6 +92,7 @@ async function fetchReportDetail(number: string): Promise<MunicipalReportDetail>
   const response = await fetch(upstream, { signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`Municipal detail returned ${response.status}`);
   const item = await response.json();
+  const photoUrls = extractCloudfrontPhotos(item?.files);
   const history = Array.isArray(item?.history)
     ? item.history
         .filter((h: { status?: unknown; createdAt?: unknown }) => typeof h?.status === 'string' && typeof h?.createdAt === 'string')
@@ -92,6 +102,7 @@ async function fetchReportDetail(number: string): Promise<MunicipalReportDetail>
     number,
     street: typeof item?.strada === 'string' && item.strada.trim() ? item.strada.trim() : undefined,
     streetNumber: typeof item?.nrStrada === 'string' && item.nrStrada.trim() ? item.nrStrada.trim() : undefined,
+    ...(photoUrls.length > 0 ? { photoUrls } : {}),
     history,
   };
 }

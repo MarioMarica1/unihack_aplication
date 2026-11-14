@@ -22,12 +22,14 @@ export type MunicipalReport = {
   coordinates?: [number, number];
   description?: string;
   photoUrl?: string;
+  photoUrls?: string[];
 };
 
 export type MunicipalReportDetail = {
   number: string;
   street?: string;
   streetNumber?: string;
+  photoUrls?: string[];
   history: { status: string; createdAt: string }[];
 };
 

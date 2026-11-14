@@ -220,10 +220,11 @@ export function NewsFeedPanel({
       </div>
 
       {/* Category Filter Pills */}
-      <div className="place-category-pills">
+      <div className="place-category-pills news-category-pills" role="group" aria-label="Filtre noutăți">
         <button
           type="button"
           className={categoryFilter === 'all' ? 'active' : ''}
+          aria-pressed={categoryFilter === 'all'}
           onClick={() => setCategoryFilter('all')}
         >
           Toate ({feedItems.length})
@@ -231,6 +232,7 @@ export function NewsFeedPanel({
         <button
           type="button"
           className={categoryFilter === 'stpt' ? 'active' : ''}
+          aria-pressed={categoryFilter === 'stpt'}
           onClick={() => setCategoryFilter('stpt')}
         >
           Devieri STPT ({stptAlerts.length})
@@ -238,6 +240,7 @@ export function NewsFeedPanel({
         <button
           type="button"
           className={categoryFilter === 'traffic' ? 'active' : ''}
+          aria-pressed={categoryFilter === 'traffic'}
           onClick={() => setCategoryFilter('traffic')}
         >
           Trafic & Străzi
@@ -245,6 +248,7 @@ export function NewsFeedPanel({
         <button
           type="button"
           className={categoryFilter === 'works' ? 'active' : ''}
+          aria-pressed={categoryFilter === 'works'}
           onClick={() => setCategoryFilter('works')}
         >
           Lucrări & Șantiere
@@ -252,6 +256,7 @@ export function NewsFeedPanel({
         <button
           type="button"
           className={categoryFilter === 'lighting' ? 'active' : ''}
+          aria-pressed={categoryFilter === 'lighting'}
           onClick={() => setCategoryFilter('lighting')}
         >
           Semafoare & Iluminat

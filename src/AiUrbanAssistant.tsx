@@ -53,6 +53,7 @@ export type AiAssistantActionCallbacks = {
 export type AiUrbanAssistantProps = {
   open: boolean;
   onToggleOpen: () => void;
+  onShowRouteOnMap?: () => void;
   activeModule: SidebarTab;
   pointA: RouteCandidate;
   pointB: RouteCandidate | null;
@@ -552,13 +553,45 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
   ]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const sheetDragStartY = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    closeRef.current?.focus({ preventScroll: true });
+    const panel = panelRef.current;
+    const viewport = window.visualViewport;
+    if (!panel || !viewport) return;
+
+    function positionPanel() {
+      if (!panel || !viewport) return;
+      panel.style.setProperty('--ai-viewport-top', `${viewport.offsetTop}px`);
+      const bottom = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      panel.style.setProperty('--ai-viewport-bottom', `${bottom}px`);
+    }
+
+    positionPanel();
+    viewport.addEventListener('resize', positionPanel);
+    viewport.addEventListener('scroll', positionPanel);
+    return () => {
+      viewport.removeEventListener('resize', positionPanel);
+      viewport.removeEventListener('scroll', positionPanel);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (open && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, open]);
+
+  function closeAssistant() {
+    sheetDragStartY.current = null;
+    onToggleOpen();
+    toggleRef.current?.focus({ preventScroll: true });
+  }
 
   // Summarize current active selection for the live context pill inside the AI panel
   const activeContextLabel = (() => {
@@ -1054,6 +1087,7 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
     <>
       {/* Floating AI Assistant Toggle Button — positioned immediately next to .theme-toggle */}
       <button
+        ref={toggleRef}
         type="button"
         className={`ai-assistant-toggle ${open ? 'active' : ''}`}
         onClick={onToggleOpen}
@@ -1069,9 +1103,16 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
       <AnimatePresence>
         {open && (
           <motion.aside
+            ref={panelRef}
             className="ai-assistant-panel"
             role="dialog"
             aria-label="Asistent Urban AI Timișoara"
+            onKeyDown={event => {
+              if (event.key === 'Escape') {
+                event.stopPropagation();
+                closeAssistant();
+              }
+            }}
             initial={{ opacity: 0, y: 14, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 14, scale: 0.96 }}
@@ -1082,14 +1123,15 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
             aria-hidden="true"
             onPointerDown={e => {
               sheetDragStartY.current = e.clientY;
+              e.currentTarget.setPointerCapture(e.pointerId);
             }}
             onPointerUp={e => {
               if (sheetDragStartY.current !== null && e.clientY - sheetDragStartY.current > 32) {
-                onToggleOpen();
+                closeAssistant();
               }
               sheetDragStartY.current = null;
             }}
-            onClick={onToggleOpen}
+            onPointerCancel={() => { sheetDragStartY.current = null; }}
           >
             <span />
           </div>
@@ -1105,9 +1147,10 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
               </div>
             </div>
             <button
+              ref={closeRef}
               type="button"
               className="icon-btn"
-              onClick={onToggleOpen}
+              onClick={closeAssistant}
               aria-label="Închide Asistentul AI"
             >
               <X size={16} />
@@ -1230,6 +1273,14 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
               <Send size={15} />
             </button>
           </form>
+          {props.onShowRouteOnMap && (
+            <button type="button" className="ai-show-route" onClick={() => {
+              props.onShowRouteOnMap?.();
+              closeAssistant();
+            }}>
+              <MapPin size={16} /> Vezi traseul pe hartă
+            </button>
+          )}
           </motion.aside>
         )}
       </AnimatePresence>

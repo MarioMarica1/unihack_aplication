@@ -1206,6 +1206,11 @@
   border-color: var(--brand-blue);
   color: #fff;
 }
+.news-category-pills {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+.news-category-pills > button { min-height: 32px; }
 .place-coords-tag {
   margin-top: 8px;
   font-size: 11px;
@@ -2948,6 +2953,7 @@
   place-items: center;
   flex-shrink: 0;
 }
+.ai-show-route, .mobile-route-details { display: none; }
 
 /* Dark theme overrides for AI Assistant */
 html[data-theme='dark'] .ai-assistant-toggle:not(.active) {
@@ -2989,33 +2995,68 @@ html[data-theme='dark'] .ai-composer input {
 }
 
 @media (max-width: 760px) {
+  .app-shell.map-first {
+    --mobile-nav-height: calc(60px + env(safe-area-inset-bottom));
+  }
+  .map-first .mobile-map-nav { height: var(--mobile-nav-height); }
+  .news-category-pills > button { min-height: 44px; }
   .ai-assistant-toggle {
     right: 58px;
     top: calc(100% + 48px);
+    min-height: 44px;
   }
   .ai-assistant-panel {
+    --ai-bottom: max(var(--mobile-nav-height), var(--ai-viewport-bottom, 0px));
     position: fixed;
     top: auto;
-    bottom: 62px;
+    bottom: var(--ai-bottom);
     left: 0;
     right: 0;
     width: 100%;
     max-width: 100%;
-    height: 70dvh;
-    max-height: 72dvh;
+    height: min(70dvh, max(0px, calc(100dvh - var(--ai-bottom) - var(--ai-viewport-top, 0px) - max(12px, env(safe-area-inset-top)))));
+    max-height: none;
     border-radius: 18px 18px 0 0;
   }
   .ai-sheet-handle {
     display: flex;
     justify-content: center;
     padding: 8px 0 4px;
-    cursor: pointer;
+    flex-shrink: 0;
+    touch-action: none;
   }
   .ai-sheet-handle span {
     width: 38px;
     height: 4px;
     border-radius: 999px;
     background: #94a3b8;
+  }
+  .ai-panel-header .icon-btn { min-width: 44px; min-height: 44px; }
+  .ai-composer input { height: 44px; font-size: 16px; }
+  .ai-send-btn { width: 44px; height: 44px; }
+  .ai-messages-list { overscroll-behavior: contain; }
+  .ai-show-route {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-shrink: 0;
+    min-height: 44px;
+    color: var(--brand-blue);
+    border-top: 1px solid var(--border-neutral);
+    font-weight: 700;
+  }
+  .map-first .mobile-route-details {
+    display: inline-flex;
+    align-items: center;
+    position: absolute;
+    bottom: 21px;
+    left: 8px;
+    z-index: 8;
+    background: var(--surface-white);
+  }
+  @media (max-height: 460px) {
+    .ai-context-bar, .ai-assistant-panel .ai-quick-prompts { display: none; }
   }
 }
 
@@ -3291,8 +3332,9 @@ html[data-theme='dark'] .ai-composer input {
     bottom: 16px;
   }
   .app-shell.map-first .map-utility-controls {
-    right: 16px;
-    bottom: 118px;
+    right: 76px;
+    bottom: 26px;
+    flex-direction: row;
   }
   .app-shell.map-first .map-utility-controls > button {
     border-radius: 999px;
@@ -3413,15 +3455,6 @@ html[data-theme='dark'] .ai-composer input {
     user-select: none;
   }
   .app-shell.map-first .ai-assistant-panel {
-    position: fixed;
-    top: auto;
-    bottom: calc(60px + env(safe-area-inset-bottom));
-    left: 0;
-    right: 0;
-    width: 100%;
-    max-width: 100%;
-    height: 70dvh;
-    max-height: 75dvh;
     z-index: 55;
     border-radius: 24px 24px 0 0;
     backdrop-filter: blur(20px) saturate(180%);
@@ -3786,7 +3819,7 @@ html[data-theme='dark'] .ai-composer input {
     position: relative;
     flex: 1;
     min-height: 0;
-    padding: 0 0 calc(60px + env(safe-area-inset-bottom));
+    padding: 0 0 var(--mobile-nav-height);
   }
   .app-shell.map-first .main-layout {
     position: relative;
@@ -3814,7 +3847,7 @@ html[data-theme='dark'] .ai-composer input {
     pointer-events: none;
   }
   .app-shell.map-first .discovery {
-    bottom: calc(60px + env(safe-area-inset-bottom));
+    bottom: var(--mobile-nav-height);
     height: 54dvh;
     max-height: 54dvh;
     transition: height 0.34s var(--ease-spatial), max-height 0.34s var(--ease-spatial), transform 0.34s var(--ease-spatial), opacity 0.25s ease;

@@ -1701,6 +1701,7 @@ export default function App({
           <button
             type="button"
             className="primary header-create"
+            aria-label={sidebarTab === 'community' ? 'Eveniment / Discuție' : 'Raportează sesizare'}
             onClick={() =>
               sidebarTab === 'community' ? openCreateCommunity('activity') : openCreateReport()
             }
@@ -1734,6 +1735,7 @@ export default function App({
         <AiUrbanAssistant
           open={aiAssistantOpen}
           onToggleOpen={() => setAiAssistantOpen(prev => !prev)}
+          onShowRouteOnMap={sidebarTab === 'route' && (route || transitRoute) ? () => setMobilePanelOpen(false) : undefined}
           activeModule={sidebarTab}
           pointA={pointA}
           pointB={pointB}
@@ -3464,18 +3466,6 @@ export default function App({
                         ))}{' '}
                         → <strong>B:</strong> {pointB?.title}
                       </p>
-                      <div className="route-result-actions">
-                        <button
-                          type="button"
-                          className="secondary full"
-                          onClick={() => {
-                            setRoute(undefined);
-                            setTransitRoute(undefined);
-                          }}
-                        >
-                          <X size={15} /> Șterge ruta de pe hartă
-                        </button>
-                      </div>
                     </div>
                   )}
 
@@ -3489,6 +3479,20 @@ export default function App({
                       onSelectVehicle={selectVehicle}
                       select={index => setTransitRoute(current => current && { ...current, selected: index })}
                     />
+                  )}
+
+                  {(route || transitRoute) && (
+                    <div className="route-result-actions">
+                      <button className="secondary route-show-map" type="button" onClick={() => setMobilePanelOpen(false)}>
+                        <MapPin size={15} /> Vezi traseul pe hartă
+                      </button>
+                      <button className="secondary" type="button" onClick={() => {
+                        setRoute(undefined);
+                        setTransitRoute(undefined);
+                      }}>
+                        <X size={15} /> Șterge ruta de pe hartă
+                      </button>
+                    </div>
                   )}
                 </div>
               ) : null}
@@ -3753,6 +3757,12 @@ export default function App({
                 <Compass size={18} />
               </button>
             </div>
+
+            {sidebarTab === 'route' && !mobilePanelOpen && !pickTarget && (
+              <button className="secondary mobile-route-details" type="button" onClick={() => setMobilePanelOpen(true)}>
+                <Route size={16} /> Detalii traseu
+              </button>
+            )}
 
             {pickTarget && (
               <div className="picking-notice" role="status">

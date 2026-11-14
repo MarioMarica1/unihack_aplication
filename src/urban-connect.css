@@ -3003,10 +3003,10 @@ html[data-theme='dark'] .ai-composer input {
 }
 
 /* Micro-interaction press scale (GPU-only transform + opacity) */
-.app-shell button:not(:disabled):not(.maplibregl-marker):not(.map-label-pin):not(.velo-map-marker):not(.city-event-map-pin) {
+.app-shell button:not(:disabled):not(.maplibregl-marker):not(.map-label-pin):not(.velo-map-marker):not(.city-event-map-marker) {
   transition: transform 0.16s var(--ease-spatial), opacity 0.16s ease, box-shadow 0.2s var(--ease-spatial);
 }
-.app-shell button:not(:disabled):not(.maplibregl-marker):not(.map-label-pin):not(.velo-map-marker):not(.city-event-map-pin):active {
+.app-shell button:not(:disabled):not(.maplibregl-marker):not(.map-label-pin):not(.velo-map-marker):not(.city-event-map-marker):active {
   transform: scale(0.96);
 }
 

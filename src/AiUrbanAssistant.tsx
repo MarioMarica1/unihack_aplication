@@ -99,7 +99,13 @@ type ChatEntry = {
 // Curated Timișoara Landmark Gazetteer for instant high-accuracy resolution before Nominatim fallback
 const TIMISOARA_LANDMARKS: { keywords: string[]; title: string; location: Point; wikiTitle: string }[] = [
   {
-    keywords: ['iulius town', 'iulius mall', 'iulius', 'united business center', 'ubc'],
+    keywords: ['shopping city', 'mall sagului', 'calea sagului mall'],
+    title: 'Shopping City Timișoara',
+    location: { lon: 21.2016, lat: 45.7244 },
+    wikiTitle: 'Timișoara',
+  },
+  {
+    keywords: ['iulius town', 'iulius mall', 'iulius', 'united business center', 'ubc', 'mall'],
     title: 'Iulius Town Timișoara',
     location: { lon: 21.2285, lat: 45.7662 },
     wikiTitle: 'Iulius_Town_Timișoara',
@@ -111,7 +117,7 @@ const TIMISOARA_LANDMARKS: { keywords: string[]; title: string; location: Point;
     wikiTitle: 'Aeroportul_Internațional_Timișoara_-_Traian_Vuia',
   },
   {
-    keywords: ['gara de nord', 'gara nord', 'gara timisoara', 'la gara', 'spre gara', 'train station', 'railway station'],
+    keywords: ['gara de nord', 'gara nord', 'gara timisoara', 'la gara', 'spre gara', 'train station', 'railway station', 'gara'],
     title: 'Gara Timișoara Nord',
     location: { lon: 21.2067, lat: 45.7511 },
     wikiTitle: 'Gara_Timișoara_Nord',
@@ -129,19 +135,19 @@ const TIMISOARA_LANDMARKS: { keywords: string[]; title: string; location: Point;
     wikiTitle: 'Catedrala_Mitropolitană_din_Timișoara',
   },
   {
-    keywords: ['piata unirii', 'union square'],
+    keywords: ['piata unirii', 'union square', 'unirii'],
     title: 'Piața Unirii, Timișoara',
     location: { lon: 21.2289, lat: 45.758 },
     wikiTitle: 'Piața_Unirii_din_Timișoara',
   },
   {
-    keywords: ['piata victoriei', 'piata operei', 'victory square', 'opera nationala', 'teatrul national'],
+    keywords: ['piata victoriei', 'piata operei', 'victory square', 'opera nationala', 'teatrul national', 'victoriei', 'centru'],
     title: 'Piața Victoriei / Opera Națională Română Timișoara',
     location: { lon: 21.2257, lat: 45.7537 },
     wikiTitle: 'Piața_Victoriei_din_Timișoara',
   },
   {
-    keywords: ['piata libertatii', 'liberty square', 'primaria veche'],
+    keywords: ['piata libertatii', 'liberty square', 'primaria veche', 'libertatii'],
     title: 'Piața Libertății, Timișoara',
     location: { lon: 21.2273, lat: 45.7556 },
     wikiTitle: 'Piața_Libertății_din_Timișoara',
@@ -171,15 +177,21 @@ const TIMISOARA_LANDMARKS: { keywords: string[]; title: string; location: Point;
     wikiTitle: 'Universitatea_Politehnica_Timișoara',
   },
   {
+    keywords: ['complexul studentesc', 'complex'],
+    title: 'Complexul Studențesc Timișoara',
+    location: { lon: 21.2392, lat: 45.7486 },
+    wikiTitle: 'Complexul_Studențesc_din_Timișoara',
+  },
+  {
     keywords: ['spitalul judetean', 'pius brinzeu', 'urgente', 'spitalul clinic judetean'],
     title: 'Spitalul Clinic Județean de Urgență „Pius Brînzeu”',
     location: { lon: 21.2415, lat: 45.7381 },
     wikiTitle: 'Spitalul_Clinic_Județean_de_Urgență_„Pius_Brînzeu”_din_Timișoara',
   },
   {
-    keywords: ['shopping city', 'mall sagului', 'calea sagului mall'],
-    title: 'Shopping City Timișoara',
-    location: { lon: 21.2016, lat: 45.7244 },
+    keywords: ['spitalul municipal', 'clinicile noi'],
+    title: 'Spitalul Clinic Municipal de Urgență Timișoara',
+    location: { lon: 21.2269, lat: 45.7623 },
     wikiTitle: 'Timișoara',
   },
   {
@@ -190,24 +202,37 @@ const TIMISOARA_LANDMARKS: { keywords: string[]; title: string; location: Point;
   },
 ];
 
-async function geocodeLocation(
+export async function geocodeLocation(
   rawQuery: string,
   candidates: RouteCandidate[],
 ): Promise<RouteCandidate | null> {
   const cleaned = rawQuery
-    .replace(/^(la|spre|catre|către|pana la|până la|to|the|in|în|din|de la|from)\s+/i, '')
-    .replace(/\s+(cu|by|using|via)\s+(tramvaiul|autobuzul|troleibuzul|bicicleta|masina|mașina|pe jos|walking|cycling|bus|tram|car).*$/i, '')
+    .replace(/^(?:până\s+|pana\s+)?(?:la|spre|catre|către|pe\s+la|the|in|în|din|de\s+la|from|to|at)\s+/i, '')
+    .replace(/\s+(?:cu|by|using|folosind|mers)\s+(?:tramvaiul|autobuzul|troleibuzul|transport(?:ul)?\s+public|bicicleta|masina|mașina|auto|pe\s+jos|walking|cycling|transit|bus|tram|car).*$/i, '')
     .replace(/[?.!,]+$/g, '')
     .trim();
   if (!cleaned) return null;
 
   const norm = normalizeSearch(cleaned);
 
-  // 1. Check curated Timișoara landmarks first
+  // 1a. Exact curated keyword match first
   for (const lm of TIMISOARA_LANDMARKS) {
-    if (lm.keywords.some(k => norm === k || norm.includes(k))) {
+    if (lm.keywords.some(k => norm === k)) {
       return { title: lm.title, location: lm.location };
     }
+  }
+
+  // 1b. Specific substring curated keyword match (longest keyword match wins)
+  let bestLandmark: { title: string; location: Point; matchLen: number } | null = null;
+  for (const lm of TIMISOARA_LANDMARKS) {
+    for (const k of lm.keywords) {
+      if (norm.includes(k) && (!bestLandmark || k.length > bestLandmark.matchLen)) {
+        bestLandmark = { title: lm.title, location: lm.location, matchLen: k.length };
+      }
+    }
+  }
+  if (bestLandmark) {
+    return { title: bestLandmark.title, location: bestLandmark.location };
   }
 
   // 2. Check local OSM places & GTFS stops catalog
@@ -250,52 +275,120 @@ async function geocodeLocation(
 
 function inferTravelMode(query: string): RouteMode {
   const norm = normalizeSearch(query);
-  if (/\b(biciclet|velo|bike|cycling|pista)\b/.test(norm)) return 'cycling';
-  if (/\b(pe jos|pietonal|walk|walking|plimbare)\b/.test(norm)) return 'walking';
-  if (/\b(masin|auto|driving|car|sofat)\b/.test(norm)) return 'driving';
+  if (/\b(biciclet|velo|bike|cycl|pista)/.test(norm)) return 'cycling';
+  if (/\b(pe jos|pietonal|walk|plimbare)/.test(norm)) return 'walking';
+  if (/\b(masin|auto\b|driv|car\b|sofat)/.test(norm)) return 'driving';
   return 'transit';
 }
 
-function parseNavigationIntent(query: string): {
+function stripTravelSuffix(text: string): string {
+  return text
+    .replace(
+      /\s+(?:cu|by|using|folosind|mers)\s+(?:tramvaiul|autobuzul|troleibuzul|transport(?:ul)?\s+public|bicicleta|masina|mașina|auto|walking|cycling|transit|bus|tram|car)\b.*$/i,
+      '',
+    )
+    .replace(/\s+pe\s+jos\b.*$/i, '')
+    .replace(/[?.!]+$/g, '')
+    .trim();
+}
+
+function cleanStopName(raw: string): string {
+  return raw
+    .replace(/^(?:până\s+|pana\s+)?(?:la|spre|către|catre|pe\s+la|prin|in|în|to|at)\s+/i, '')
+    .trim();
+}
+
+function extractStopsFromChain(rawChain: string): { waypointRaws: string[]; destinationRaw?: string } {
+  const withoutMode = stripTravelSuffix(rawChain);
+  if (!withoutMode) return { waypointRaws: [] };
+
+  const hasSequentialConnector =
+    /(?:,\s*|(?:și|si)\s+apoi|(?:și|si)\s+dup[ăa]\s+(?:aceea|aia|care)|(?:și|si)\s+pe\s+urm[ăa]|apoi|dup[ăa]\s+(?:aceea|aia|care)|pe\s+urm[ăa]|and\s+then|then|after\s+that)\s+/i.test(
+      withoutMode,
+    );
+
+  // "destinatie cu oprire la waypoint" / "destinatie via waypoint"
+  const viaMatch = !hasSequentialConnector
+    ? withoutMode.match(/^(.+?)\s+(?:cu\s+oprire\s+(?:la|în|in|prin)|cu\s+escal[ăa]\s+(?:la|în|in)|with\s+a?\s*stop\s+(?:at|in)|via)\s+(.+)$/i)
+    : null;
+  if (viaMatch) {
+    const dest = cleanStopName(viaMatch[1]);
+    const viaStops = viaMatch[2]
+      .split(/\s*(?:,|;|(?:^|\s)(?:și|si)(?:\s+(?:la|pe\s+la))?(?=\s|$)|\band\b)\s*/i)
+      .map(cleanStopName)
+      .filter(Boolean);
+    return {
+      waypointRaws: viaStops,
+      destinationRaw: dest,
+    };
+  }
+
+  // Chronological multi-stop sequence: "la gara si apoi la mall" -> waypoints: ["gara"], destination: "mall"
+  const parts = withoutMode
+    .split(
+      /\s*(?:,\s*|(?:și|si)\s+apoi|(?:și|si)\s+dup[ăa]\s+(?:aceea|aia|care)|(?:și|si)\s+pe\s+urm[ăa]|apoi|dup[ăa]\s+(?:aceea|aia|care)|pe\s+urm[ăa]|and\s+then|then|after\s+that|cu\s+oprire\s+(?:la|în|in|prin)|via|prin)\s+/i,
+    )
+    .map(cleanStopName)
+    .filter(Boolean);
+
+  if (parts.length <= 1) {
+    return { waypointRaws: [], destinationRaw: parts[0] };
+  }
+  return {
+    waypointRaws: parts.slice(0, -1),
+    destinationRaw: parts[parts.length - 1],
+  };
+}
+
+export function parseNavigationIntent(query: string): {
   isNavigation: boolean;
   originRaw?: string;
+  waypointRaws: string[];
   destinationRaw?: string;
   mode: RouteMode;
 } {
   const trimmed = query.trim();
   const mode = inferTravelMode(trimmed);
 
-  // Pattern: "de la X la Y" / "from X to Y"
+  // Pattern: "de la X la Y (și apoi la Z)" / "from X to Y (then Z)"
   const fromToMatch = trimmed.match(
-    /(?:de la|din|from)\s+(.+?)\s+(?:la|spre|către|catre|până la|pana la|to)\s+(.+?)(?:\s+cu\s+|\s+pe\s+jos|\s+by\s+|[?.!]|$)/i,
+    /(?:de la|din|from)\s+(.+?)\s+(?:la|spre|către|catre|până la|pana la|to)\s+(.+)$/i,
   );
   if (fromToMatch) {
-    return {
-      isNavigation: true,
-      originRaw: fromToMatch[1].trim(),
-      destinationRaw: fromToMatch[2].trim(),
-      mode,
-    };
-  }
-
-  // Pattern: "Take me to X", "How do I get to X", "Vreau să merg la X", "Cum ajung la X", "Du-mă la X", "Navighează la X", "Rută spre X"
-  const navPatterns = [
-    /(?:take me to|how do i get to|how to get to|navigate to|route to|directions to|go to)\s+(.+)/i,
-    /(?:vreau să merg la|vreau sa merg la|vreau să ajung la|vreau sa ajung la|cum ajung la|cum pot ajunge la|cum merg la|du-mă la|du-ma la|navighează la|navigheaza la|navighează spre|navigheaza spre|rută spre|ruta spre|rută la|ruta la|traseu spre|traseu la|mergi la)\s+(.+)/i,
-  ];
-
-  for (const regex of navPatterns) {
-    const match = trimmed.match(regex);
-    if (match && match[1]) {
+    const stops = extractStopsFromChain(fromToMatch[2]);
+    if (stops.destinationRaw) {
       return {
         isNavigation: true,
-        destinationRaw: match[1].trim(),
+        originRaw: stripTravelSuffix(fromToMatch[1]),
+        waypointRaws: stops.waypointRaws,
+        destinationRaw: stops.destinationRaw,
         mode,
       };
     }
   }
 
-  return { isNavigation: false, mode };
+  // Pattern: "Take me to X", "Vreau să merg la X și apoi la Y", "Du-mă la X", "Rută spre X", etc.
+  const navPatterns = [
+    /(?:take me to|how do i get to|how to get to|navigate to|route to|directions to|go to)\s+(.+)/i,
+    /(?:fă-mi o rută|fa-mi o ruta|planifică(?:\s+o)?\s+rută|planifica(?:\s+o)?\s+ruta|calculează(?:\s+o)?\s+rută|calculeaza(?:\s+o)?\s+ruta|vreau să merg|vreau sa merg|vreau să ajung|vreau sa ajung|vreau la|cum ajung|cum pot ajunge|cum merg|du-mă|du-ma|navighează|navigheaza|rută|ruta|traseu|mergi)\s+(?:(?:până\s+|pana\s+)?(?:la|spre|către|catre|pe\s+la|în|in)\s+)?(.+)/i,
+  ];
+
+  for (const regex of navPatterns) {
+    const match = trimmed.match(regex);
+    if (match && match[1]) {
+      const stops = extractStopsFromChain(match[1]);
+      if (stops.destinationRaw) {
+        return {
+          isNavigation: true,
+          waypointRaws: stops.waypointRaws,
+          destinationRaw: stops.destinationRaw,
+          mode,
+        };
+      }
+    }
+  }
+
+  return { isNavigation: false, waypointRaws: [], mode };
 }
 
 async function fetchWikipediaSummary(
@@ -494,14 +587,16 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
       const norm = normalizeSearch(prompt);
 
       // =========================================================================
-      // TOOL 1: ACTIONABLE ROUTING (Function Calling: plan_route)
+      // TOOL 1: ACTIONABLE ROUTING (Function Calling: plan_route + Waypoints)
       // =========================================================================
       const navIntent = parseNavigationIntent(prompt);
       if (navIntent.isNavigation && navIntent.destinationRaw) {
-        const destination = await geocodeLocation(navIntent.destinationRaw, routeCandidates);
-        const resolvedCustomOrigin = navIntent.originRaw
-          ? await geocodeLocation(navIntent.originRaw, routeCandidates)
-          : null;
+        const [destination, resolvedCustomOrigin, ...maybeWaypoints] = await Promise.all([
+          geocodeLocation(navIntent.destinationRaw, routeCandidates),
+          navIntent.originRaw ? geocodeLocation(navIntent.originRaw, routeCandidates) : Promise.resolve(null),
+          ...navIntent.waypointRaws.map(raw => geocodeLocation(raw, routeCandidates)),
+        ]);
+        const resolvedWaypoints = maybeWaypoints.filter((w): w is RouteCandidate => Boolean(w));
         const origin: RouteCandidate =
           resolvedCustomOrigin ??
           (userLocation
@@ -512,6 +607,7 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
           callbacks.onPlanRoute({
             origin,
             destination,
+            waypoints: resolvedWaypoints,
             mode: navIntent.mode,
           });
 
@@ -524,7 +620,20 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
                   ? 'Auto'
                   : 'Transport Public STPT';
 
-          const distMeters = Math.round(distance(origin.location, destination.location));
+          const routeChain = [origin, ...resolvedWaypoints, destination];
+          let distMeters = 0;
+          for (let i = 0; i < routeChain.length - 1; i++) {
+            distMeters += distance(routeChain[i].location, routeChain[i + 1].location);
+          }
+          distMeters = Math.round(distMeters);
+
+          const waypointLines = resolvedWaypoints
+            .map((wp, idx) => `\n• **Oprire ${idx + 1}:** ${wp.title}`)
+            .join('');
+          const summaryCall = resolvedWaypoints.length
+            ? `plan_route(A="${origin.title}", stops=[${resolvedWaypoints.map(w => `"${w.title}"`).join(', ')}], B="${destination.title}", mode="${navIntent.mode}")`
+            : `plan_route(A="${origin.title}", B="${destination.title}", mode="${navIntent.mode}")`;
+
           setMessages(prev => [
             ...prev,
             {
@@ -533,9 +642,9 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
               timestamp: new Date().toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' }),
               toolCall: {
                 toolName: 'plan_route',
-                summary: `plan_route(A="${origin.title}", B="${destination.title}", mode="${navIntent.mode}")`,
+                summary: summaryCall,
               },
-              text: `Am activat **Planificatorul de călătorie (A → B)** și am desenat ruta direct pe hartă:\n• **Plecare (A):** ${origin.title}\n• **Destinație (B):** ${destination.title} (${(distMeters / 1000).toFixed(1)} km în linie dreaptă)\n• **Mod de deplasare:** ${modeName}`,
+              text: `Am activat **Planificatorul de călătorie (${resolvedWaypoints.length ? 'A → Opriri → B' : 'A → B'})** și am desenat ruta direct pe hartă:\n• **Plecare (A):** ${origin.title}${waypointLines}\n• **Destinație finală (B):** ${destination.title} (${(distMeters / 1000).toFixed(1)} km în linie dreaptă)\n• **Mod de deplasare:** ${modeName}`,
             },
           ]);
           return;
@@ -912,7 +1021,7 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
   const quickPrompts = [
     selectedVehicle
       ? `Unde merge ${vehicleLabels[selectedVehicle.type].toLowerCase()}ul ${selectedVehicle.line}?`
-      : 'Vreau să merg la gară',
+      : 'Vreau să merg la gară și apoi la mall',
     'Take me to Iulius Town',
     selectedPlace
       ? `Ce este ${selectedPlace.title}?`

@@ -275,6 +275,7 @@ export default function App({
 
   // Search & Omni-Search & Floating AI Urban Assistant
   const [search, setSearch] = useState('');
+  const [placesSearch, setPlacesSearch] = useState('');
   const [omniSearchOpen, setOmniSearchOpen] = useState(false);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
 
@@ -360,7 +361,7 @@ export default function App({
     sidebarTab === 'reports' || sidebarTab === 'news',
   );
   const veloFeed = useVeloStations(sidebarTab === 'velo');
-  const cityEventsFeed = useCityEvents(sidebarTab === 'community');
+  const cityEventsFeed = useCityEvents(sidebarTab === 'community' || aiAssistantOpen || omniSearchOpen);
   const { detail: municipalDetail } = useMunicipalReportDetail(selectedMunicipalNumber || undefined);
 
   const detailHeading = useRef<HTMLHeadingElement>(null);
@@ -394,6 +395,10 @@ export default function App({
     setSidebarTab(nextTab);
     setMobilePanelOpen(true);
     setOmniSearchOpen(false);
+    setSearch('');
+    setPlacesSearch('');
+    setCommunityFilter('all');
+    setCommunityEventCategory('all');
 
     // Reset all previous module selections so the map context is completely isolated
     setSelectedPinId('');
@@ -664,14 +669,14 @@ export default function App({
   // Filtered Community List (strictly decoupled: zero reports!)
   const visibleCommunityPins = useMemo(() => {
     if (communityFilter === 'official') return [];
-    const q = search.trim().toLowerCase();
+    const q = normalizeSearch(search);
     return communityPostPins
       .filter(p =>
         communityFilter === 'saved'
           ? savedIds.includes(p.id)
           : communityFilter === 'all' || p.type === communityFilter,
       )
-      .filter(p => !q || `${p.title} ${p.description} ${p.category} ${p.place}`.toLowerCase().includes(q))
+      .filter(p => !q || normalizeSearch(`${p.title} ${p.description} ${p.category} ${p.place}`).includes(q))
       .sort((a, b) => {
         if (sortBy === 'near') return distance(a.location, pointA.location) - distance(b.location, pointA.location);
         if (sortBy === 'active') {
@@ -695,12 +700,12 @@ export default function App({
   // Filtered Official Municipal & Cultural Events for Community tab
   const visibleCityEvents = useMemo(() => {
     if (communityFilter === 'activity' || communityFilter === 'discussion') return [];
-    const q = search.trim().toLowerCase();
+    const q = normalizeSearch(search);
     return cityEventsFeed.events
       .filter(ev => {
         if (communityFilter === 'saved' && !savedEventIds.includes(ev.id)) return false;
         if (communityEventCategory !== 'all' && ev.category !== communityEventCategory) return false;
-        if (q && !`${ev.title} ${ev.venue} ${ev.category} ${ev.source}`.toLowerCase().includes(q)) return false;
+        if (q && !normalizeSearch(`${ev.title} ${ev.venue} ${ev.category} ${ev.source}`).includes(q)) return false;
         return true;
       })
       .sort((a, b) => {
@@ -716,10 +721,10 @@ export default function App({
 
   // Filtered Citizen Reports
   const visibleCitizenReports = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = normalizeSearch(search);
     return citizenReportPins
       .filter(() => reportsSourceFilter !== 'municipal')
-      .filter(p => !q || `${p.title} ${p.description} ${p.category} ${p.subcategory ?? ''} ${p.place}`.toLowerCase().includes(q))
+      .filter(p => !q || normalizeSearch(`${p.title} ${p.description} ${p.category} ${p.subcategory ?? ''} ${p.place}`).includes(q))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [citizenReportPins, reportsSourceFilter, search]);
 
@@ -812,8 +817,8 @@ export default function App({
 
   const placeFeatures = infrastructure.places?.features || [];
   const filteredPlaces = useMemo(
-    () => findPlaces(infrastructure, search, placeCategory, enabledPoiKinds),
-    [infrastructure, search, placeCategory, enabledPoiKinds],
+    () => findPlaces(infrastructure, placesSearch, placeCategory, enabledPoiKinds),
+    [infrastructure, placesSearch, placeCategory, enabledPoiKinds],
   );
 
   // Autocomplete candidates for Google Maps-style Route Planner (Point A, Waypoints & Point B)
@@ -865,8 +870,11 @@ export default function App({
     const pmt = (municipalFeed.allReports.length ? municipalFeed.allReports : municipalFeed.reports)
       .filter(r => normalizeSearch(`${r.number} ${r.title} ${r.category}`).includes(q))
       .slice(0, 3);
-    return { lines, places, reports, pmt };
-  }, [search, lineSummaries, infrastructure, citizenReportPins, municipalFeed.allReports, municipalFeed.reports]);
+    const events = cityEventsFeed.events
+      .filter(ev => normalizeSearch(`${ev.title} ${ev.venue} ${ev.category} ${ev.source}`).includes(q))
+      .slice(0, 4);
+    return { lines, places, reports, pmt, events };
+  }, [search, lineSummaries, infrastructure, citizenReportPins, municipalFeed.allReports, municipalFeed.reports, cityEventsFeed.events]);
 
   async function run(action: Action, okText?: string) {
     if (!requireAuthenticatedUser()) return false;
@@ -1506,6 +1514,12 @@ export default function App({
           <div className="global-search" role="search">
             <Search size={16} />
             <input
+              type="search"
+              name="urban-omni-search"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               value={search}
               onFocus={() => setOmniSearchOpen(true)}
               onChange={e => {
@@ -1626,10 +1640,33 @@ export default function App({
                 </div>
               )}
 
+              {omniResults.events.length > 0 && (
+                <div className="omni-section">
+                  <span className="omni-section-title">Evenimente Oficiale</span>
+                  {omniResults.events.map(ev => (
+                    <button
+                      type="button"
+                      key={ev.id}
+                      className="omni-item"
+                      onClick={() => {
+                        setOmniSearchOpen(false);
+                        switchModule('community');
+                        setSelectedCityEvent(ev);
+                      }}
+                    >
+                      <Ticket size={14} color="#0F52BA" />
+                      <span>{ev.title}</span>
+                      <small>{ev.venue}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {omniResults.lines.length === 0 &&
                 omniResults.places.length === 0 &&
                 omniResults.pmt.length === 0 &&
-                omniResults.reports.length === 0 && (
+                omniResults.reports.length === 0 &&
+                omniResults.events.length === 0 && (
                   <div className="omni-empty">Niciun rezultat pentru „{search}”.</div>
                 )}
             </div>
@@ -1698,17 +1735,15 @@ export default function App({
             onPlanRoute: ({ origin, destination, waypoints: nextWaypoints, mode }) => {
               const targetMode = mode ?? travelMode;
               const resolvedOrigin = origin ?? pointA;
-              const resolvedWaypoints = nextWaypoints ?? waypoints;
+              const resolvedWaypoints = nextWaypoints ?? [];
+              switchModule('route');
               if (origin) {
                 setPointA(origin);
                 setPointAQuery(origin.title);
               }
-              if (nextWaypoints) {
-                setWaypoints(nextWaypoints);
-                setWaypointQueries(nextWaypoints.map(w => w.title));
-              }
+              setWaypoints(resolvedWaypoints);
+              setWaypointQueries(resolvedWaypoints.map(w => w.title));
               setTravelMode(targetMode);
-              switchModule('route');
               setPointB(destination);
               setPointBQuery(destination.title);
               setRoute(undefined);
@@ -2865,6 +2900,21 @@ export default function App({
                     </button>
                   </div>
 
+                  {search.trim() && (
+                    <div className="results-heading" style={{ padding: '0 18px 10px' }}>
+                      <span className="results-count">
+                        Filtrat după căutare: <strong>„{search}”</strong>
+                      </span>
+                      <button
+                        type="button"
+                        className="stop-route-btn"
+                        onClick={() => setSearch('')}
+                      >
+                        Șterge filtrul
+                      </button>
+                    </div>
+                  )}
+
                   <div className="pin-list" role="region" aria-label="Evenimente și Postări Comunitate">
                     {/* Official Municipal & Cultural Events Geolocated on the Map */}
                     {visibleCityEvents.map(ev => {
@@ -2986,7 +3036,24 @@ export default function App({
                       <div className="empty-state">
                         <Users size={28} />
                         <h3>Nu există evenimente sau discuții pe selecția curentă</h3>
-                        <p>Fii primul care organizează o activitate sau deschide o discuție în cartierul tău.</p>
+                        <p>
+                          {search.trim() || communityFilter !== 'all' || communityEventCategory !== 'all'
+                            ? 'Filtrele active sau textul din bara de căutare ascund evenimentele disponibile.'
+                            : 'Fii primul care organizează o activitate sau deschide o discuție în cartierul tău.'}
+                        </p>
+                        {(search.trim() || communityFilter !== 'all' || communityEventCategory !== 'all') && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => {
+                              setSearch('');
+                              setCommunityFilter('all');
+                              setCommunityEventCategory('all');
+                            }}
+                          >
+                            Afișează toate evenimentele ({cityEventsFeed.events.length + communityPostPins.length})
+                          </button>
+                        )}
                         <div className="two-actions" style={{ width: '100%' }}>
                           <button type="button" className="primary" onClick={() => openCreateCommunity('activity')}>
                             <Calendar size={14} /> Creează eveniment
@@ -3003,8 +3070,8 @@ export default function App({
                 /* 6. ORAȘ & STRATURI INTELIGENTE (Smart Layers + BaseMap Style Switcher + Multi-POI Toggles) */
                 <PlacesPanel
                   places={filteredPlaces}
-                  query={search}
-                  setQuery={setSearch}
+                  query={placesSearch}
+                  setQuery={setPlacesSearch}
                   category={placeCategory}
                   setCategory={handleSelectSmartCategory}
                   baseMapStyle={baseMapStyle}

@@ -34,7 +34,8 @@ export default function MapLayersPanel({ visibility, toggle, layers, labels, set
     {mobilityActive && <div className="active-layer-legend" aria-label="Legendă mobilitate">
       {(['cycleways', 'tramways', 'sidewalks'] as const).filter(key => visibility[key]).map(key =>
         <span key={key}><i style={{ background: layerDefinitions[key].color }} />{layerDefinitions[key].short}</span>)}
-      <small>Linie continuă — geometrie separată. Linie întreruptă — informație pe axul străzii.</small>
+      <small><span className="legend-line solid" /> Geometrie cartografiată separat</small>
+      <small><span className="legend-line dashed" /> Informație pe axul străzii</small>
     </div>}
     <details className="data-notes"><summary><Layers size={15} />Acoperire și sursa datelor</summary><div>
       <p>Zona demonstrativă acoperă centrul Timișoarei și cartierele apropiate. Harta de bază se poate explora oriunde. Export OSM din {new Date(metadata.exportedAt).toLocaleDateString('ro-RO')}.</p>

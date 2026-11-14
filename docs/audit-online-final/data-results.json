@@ -1,0 +1,87 @@
+{
+  "publicRead": true,
+  "totalPins": 8,
+  "demoPins": 8,
+  "types": {
+    "report": 3,
+    "activity": 3,
+    "discussion": 2
+  },
+  "demoMessages": 8,
+  "activities": [
+    {
+      "title": "DEMO · La pas prin cartier",
+      "startsAt": "2026-11-15T14:00:00+00:00",
+      "endsAt": "2026-11-15T16:00:00+00:00",
+      "participants": 2
+    },
+    {
+      "title": "DEMO · Cine vine la un meci de baschet?",
+      "startsAt": "2026-11-14T15:00:00+00:00",
+      "endsAt": "2026-11-14T17:00:00+00:00",
+      "participants": 2,
+      "capacity": 8
+    },
+    {
+      "title": "DEMO · Un parc mai verde, împreună",
+      "startsAt": "2026-11-13T08:00:00+00:00",
+      "endsAt": "2026-11-13T10:00:00+00:00",
+      "participants": 2,
+      "capacity": 12
+    }
+  ],
+  "photos": [
+    {
+      "status": 200,
+      "bytes": 3452,
+      "type": "image/webp"
+    },
+    {
+      "status": 200,
+      "bytes": 3452,
+      "type": "image/webp"
+    },
+    {
+      "status": 200,
+      "bytes": 7374,
+      "type": "image/webp"
+    },
+    {
+      "status": 200,
+      "bytes": 3452,
+      "type": "image/webp"
+    },
+    {
+      "status": 200,
+      "bytes": 5500,
+      "type": "image/webp"
+    }
+  ],
+  "layers": [
+    {
+      "name": "cycleways",
+      "count": 143,
+      "status": 200,
+      "uniqueIds": true
+    },
+    {
+      "name": "tramways",
+      "count": 218,
+      "status": 200,
+      "uniqueIds": true
+    },
+    {
+      "name": "sidewalks",
+      "count": 3063,
+      "status": 200,
+      "uniqueIds": true
+    },
+    {
+      "name": "places",
+      "count": 4227,
+      "status": 200,
+      "uniqueIds": true
+    }
+  ],
+  "testPinsRemaining": 0
+}

@@ -1,0 +1,44 @@
+{
+  "date": "2026-11-12",
+  "origin": "https://vecin-unihack-2026.netlify.app",
+  "commit": "a1885190f3a7057158aef6b3e71ea34cf106cae4",
+  "environment": "Chrome desktop 1440x900 and isolated touch sessions at 390x844 / 320x844, real Supabase",
+  "onlineUi": {
+    "passwordLoginBothAccountsAndRefresh": "passed",
+    "requiredPhotoAndInvalidFileType": "passed",
+    "reportPublicationAndPhoto": "passed",
+    "desktopClipboardLinkOpenedOnMobile": "passed",
+    "supportMessageSyncAndRefresh": "passed",
+    "savedPersistenceRemovalEditResolveReopenAndMessageDeletion": "passed",
+    "capacityEnrollmentWithdrawalSync": "passed",
+    "reportAssociatedActivityCancellationAndHistoryFilter": "passed",
+    "mobileDiscussionRequiredLocationCommaCoordinatesMapDraftReportAndAuthorWithdrawal": "passed",
+    "signOutBothAccounts": "passed",
+    "temporaryRecordsAndPhotoCleanup": "passed"
+  },
+  "realBackend": {
+    "twoDistinctConfirmedAccounts": "passed",
+    "anonymousWriteDeniedAndRequiredLocation": "passed",
+    "messagesOwnershipAndPrivateSaved": "passed",
+    "activityEnrollmentWithdrawalCancellation": "passed",
+    "photoOwnershipEditSupportResolveAndReopen": "passed",
+    "realtimeNotificationBetweenAccounts": "passed",
+    "temporaryDataCleanup": "passed"
+  },
+  "localChecks": {
+    "vitest": "33 tests passed in 6 files",
+    "typescriptAndProductionBuild": "passed",
+    "npmAuditProduction": "0 known vulnerabilities",
+    "buildWarning": "MapLibre chunk approximately 1090 kB minified, 299 kB gzip; separate worker approximately 518 kB"
+  },
+  "notVerified": [
+    "Physical phone camera, GPS accuracy, virtual keyboard, native share and Safari/iOS",
+    "Magic-link delivery and account recovery with production SMTP",
+    "Two distinct non-organizer users concurrently claiming the last place on hosted Supabase"
+  ],
+  "transientAuditEvents": [
+    "An initial associated-activity check used an independent activity due to a test-script line-ending mismatch. The script was corrected; the actual associated-activity workflow passed.",
+    "Two follow-up runs hit a connection timeout before reaching the workflows. The complete subsequent run passed.",
+    "The route screenshot was retaken after waiting for map rendering, confirming the route line as well as numbered markers."
+  ]
+}

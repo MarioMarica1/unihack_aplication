@@ -32,14 +32,14 @@ export async function calculateRoute(start: Point, stops: Point[], signal?: Abor
   });
   if (!response.ok) throw new Error('Serviciul de rutare nu răspunde. Punctele tale au fost păstrate.');
   const result = await response.json();
-  if (result.code !== 'Ok' || !result.trips?.length || result.trips.length !== 1 || result.waypoints?.length !== points.length) throw new Error('Nu există un circuit rutier între toate punctele selectate.');
+  if (result.code !== 'Ok' || !result.trips?.length || result.trips.length !== 1 || result.waypoints?.length !== points.length) throw new Error('Nu există un traseu între toate punctele selectate.');
   const trip = result.trips[0];
   if (trip.geometry?.type !== 'LineString' || !Array.isArray(trip.geometry.coordinates) || trip.geometry.coordinates.length < 2 || !Number.isFinite(trip.distance) || !Number.isFinite(trip.duration)) throw new Error('Serviciul a returnat un traseu invalid. Reîncearcă.');
   const indices = result.waypoints.map((p: { waypoint_index: number }) => p.waypoint_index);
   if (new Set(indices).size !== points.length || indices.some((i: number) => !Number.isInteger(i) || i < 0 || i >= points.length)) throw new Error('Ordinea opririlor primită de la furnizor este invalidă.');
   const order = result.waypoints.map((p: { waypoint_index: number }, index: number) => ({ index, position: p.waypoint_index })).sort((a: { position: number }, b: { position: number }) => a.position - b.position).map((p: { index: number }) => p.index);
   const warnings = result.waypoints.some((p: { distance: number }) => p.distance > 50) ? [`Unele puncte au fost ajustate la rețeaua disponibilă pentru modul „${travelModes[mode].label}”.`] : [];
-  if (mode === 'cycling') warnings.push('Profilul pentru bicicletă poate folosi și străzi comune cu mașinile; nu garantează un circuit exclusiv pe piste.');
+  if (mode === 'cycling') warnings.push('Profilul pentru bicicletă poate folosi și străzi comune cu mașinile; nu garantează un traseu exclusiv pe piste.');
   const waypoints = result.waypoints.map((p: { location?: number[] }, index: number) => p.location?.length === 2 ? { lon: p.location[0], lat: p.location[1] } : points[index]);
   return { geometry: trip.geometry, distance: trip.distance, duration: trip.duration, order, warnings, mode, waypoints };
 }

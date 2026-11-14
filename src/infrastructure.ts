@@ -9,7 +9,6 @@ export const layerDefinitions = {
 };
 export type LayerKey = keyof typeof layerDefinitions;
 export type LayerVisibility = Record<LayerKey, boolean>;
-export type CommunityVisibility = Record<'report' | 'activity' | 'discussion', boolean>;
 export type InfrastructureMetadata = { exportedAt: string; osmTimestamp?: string; counts: Record<LayerKey, number>; bbox: number[]; source: string };
 export type Infrastructure = { cycleways: FeatureCollection<LineString>; tramways: FeatureCollection<LineString>; sidewalks: FeatureCollection<LineString>; places: FeatureCollection<GeoPoint>; metadata: InfrastructureMetadata };
 export type MapPlace = { id: string; title: string; location: { lon: number; lat: number }; kind?: string };

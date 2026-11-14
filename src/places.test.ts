@@ -4,6 +4,12 @@ import { findPlaces, normalizeSearch } from './PlacesPanel';
 import type { Infrastructure } from './infrastructure';
 const data = { places: JSON.parse(readFileSync('public/data/places.geojson','utf8')) } as Infrastructure;
 describe('Căutarea locurilor reale', () => {
+  it('afișează repere OSM cunoscute primele în lista Toate', () => {
+    const featured = findPlaces(data, '', 'all').slice(0, 3);
+    expect(featured.map(feature => feature.properties?.osmId)).toEqual([
+      'node/13157952377', 'way/4975934', 'relation/1250434',
+    ]);
+  });
   it('găsește locul și fără diacritice, păstrând identitatea OSM și coordonatele', () => {
     const matches = findPlaces(data, 'carturesti', 'all');
     expect(matches.length).toBeGreaterThan(0);

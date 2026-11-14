@@ -1,0 +1,171 @@
+{
+  "results": [
+    {
+      "name": "chrome desktop 1440×900",
+      "ok": true,
+      "detail": {
+        "browser": "157.0.8103.39",
+        "controls": 4
+      }
+    },
+    {
+      "name": "chrome filtre comune, diacritice, detalii si deep link",
+      "ok": true,
+      "detail": {
+        "directUrl": "https://vecin-unihack-2026.netlify.app/pins/c60e7354-802e-4948-abf4-dd6285fbf1b1",
+        "title": "DEMO · Coș de gunoi pentru spațiul verde"
+      }
+    },
+    {
+      "name": "chrome dialog accesibil, conectare necesara, aspect 1280×800",
+      "ok": true
+    },
+    {
+      "name": "OSM indisponibil si recuperare fara pierderea comunitatii",
+      "ok": true
+    },
+    {
+      "name": "Limite circuit, opt opriri si eroare OSRM",
+      "ok": true
+    },
+    {
+      "name": "Eroare harta de baza si reîncercare",
+      "ok": true
+    },
+    {
+      "name": "Ecran 390×844",
+      "ok": true,
+      "detail": {
+        "overflow": false,
+        "controls": [
+          {
+            "name": "Mărește harta",
+            "width": 44,
+            "height": 44,
+            "visible": true,
+            "covered": false
+          },
+          {
+            "name": "Micșorează harta",
+            "width": 44,
+            "height": 44,
+            "visible": true,
+            "covered": false
+          },
+          {
+            "name": "Localizează-mă",
+            "width": 44,
+            "height": 44,
+            "visible": true,
+            "covered": false
+          },
+          {
+            "name": "Arată toate pinurile",
+            "width": 44,
+            "height": 44,
+            "visible": true,
+            "covered": false
+          }
+        ],
+        "participationVisible": true
+      }
+    },
+    {
+      "name": "Ecran 320×844",
+      "ok": true,
+      "detail": {
+        "overflow": false,
+        "controls": [
+          {
+            "name": "Mărește harta",
+            "width": 44,
+            "height": 44,
+            "visible": true,
+            "covered": false
+          },
+          {
+            "name": "Micșorează harta",
+            "width": 44,
+            "height": 44,
+            "visible": true,
+            "covered": false
+          },
+          {
+            "name": "Localizează-mă",
+            "width": 44,
+            "height": 44,
+            "visible": true,
+            "covered": false
+          },
+          {
+            "name": "Arată toate pinurile",
+            "width": 44,
+            "height": 44,
+            "visible": true,
+            "covered": false
+          }
+        ],
+        "participationVisible": true
+      }
+    },
+    {
+      "name": "Ecran 844×390",
+      "ok": true,
+      "detail": {
+        "overflow": false,
+        "controls": [
+          {
+            "name": "Mărește harta",
+            "width": 38,
+            "height": 38,
+            "visible": true,
+            "covered": false
+          },
+          {
+            "name": "Micșorează harta",
+            "width": 38,
+            "height": 38,
+            "visible": true,
+            "covered": false
+          },
+          {
+            "name": "Localizează-mă",
+            "width": 40,
+            "height": 40,
+            "visible": true,
+            "covered": false
+          },
+          {
+            "name": "Arată toate pinurile",
+            "width": 40,
+            "height": 40,
+            "visible": true,
+            "covered": false
+          }
+        ],
+        "participationVisible": true
+      }
+    },
+    {
+      "name": "msedge desktop 1440×900",
+      "ok": true,
+      "detail": {
+        "browser": "157.0.4341.46",
+        "controls": 4
+      }
+    },
+    {
+      "name": "msedge filtre comune, diacritice, detalii si deep link",
+      "ok": true,
+      "detail": {
+        "directUrl": "https://vecin-unihack-2026.netlify.app/pins/c60e7354-802e-4948-abf4-dd6285fbf1b1",
+        "title": "DEMO · Coș de gunoi pentru spațiul verde"
+      }
+    },
+    {
+      "name": "msedge dialog accesibil, conectare necesara, aspect 1280×800",
+      "ok": true
+    }
+  ],
+  "errors": []
+}

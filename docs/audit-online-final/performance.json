@@ -1,0 +1,22 @@
+{
+  "simulated": {
+    "latencyMs": 150,
+    "downloadBytesPerSecond": 200000,
+    "cpuSlowdown": 4
+  },
+  "controlsReadyMs": 6707,
+  "mapReadyMs": 21206,
+  "paints": [
+    {
+      "name": "first-paint",
+      "startMs": 2520
+    },
+    {
+      "name": "first-contentful-paint",
+      "startMs": 3868
+    }
+  ],
+  "datasetsLoaded": [],
+  "overflow": false,
+  "errors": []
+}

@@ -99,8 +99,8 @@ export default function CloudApp() {
     return () => data.subscription.unsubscribe();
   }, []);
 
-  if (!client || !store) return <main className="fatal"><h1>Vecin nu este configurat</h1><p>Lipsesc datele de conectare la comunitate.</p></main>;
-  if (user === undefined) return <main className="fatal"><p role="status">Se încarcă Vecin…</p></main>;
+  if (!client || !store) return <main className="fatal"><h1>Urban Connect nu este configurat</h1><p>Lipsesc datele de conectare la comunitate.</p></main>;
+  if (user === undefined) return <main className="fatal"><p role="status">Se încarcă Urban Connect…</p></main>;
   const name = String(user?.user_metadata.display_name || '').trim().slice(0, 40);
   const profile = user ? person(user.id, name.length >= 2 ? name : `Vecin ${user.id.slice(0, 6)}`) : null;
   return <App cloud={{ store, user: profile, account: <Account client={client} user={user} /> }} />;

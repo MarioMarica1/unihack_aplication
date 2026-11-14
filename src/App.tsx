@@ -82,6 +82,8 @@ import type { OfficialCityEvent } from './city-events';
 import type { ActiveLineRoute, NetworkSubFilters } from './mobility-map';
 import { AiUrbanAssistant } from './AiUrbanAssistant';
 import type { MapViewportState } from './AiUrbanAssistant';
+import MobileSheetHandle from './MobileSheetHandle';
+import type { MobileSheetSnap } from './MobileSheetHandle';
 import { SkeletonCards } from './SkeletonCards';
 
 const MapCanvas = lazy(() => import('./MapCanvas'));
@@ -341,9 +343,7 @@ export default function App({
   const [layerLoading, setLayerLoading] = useState<Partial<Record<LayerKey, boolean>>>({});
   const [placeCategory, setPlaceCategory] = useState('all');
   const [mobilePanelOpen, setMobilePanelOpen] = useState(true);
-  const [mobileSheetSnap, setMobileSheetSnap] = useState<'peek' | 'half' | 'full'>('half');
-  const sheetDragStartY = useRef<number | null>(null);
-  const sheetDragged = useRef(false);
+  const [mobileSheetSnap, setMobileSheetSnap] = useState<MobileSheetSnap>('half');
   const [reportFormStep, setReportFormStep] = useState<1 | 2 | 3>(1);
   const [, setInfrastructureInspection] = useState<{ title: string; description: string } | null>(null);
 
@@ -1803,57 +1803,7 @@ export default function App({
       <main className="workspace" id="harta">
         <div className="main-layout">
           <section className="discovery" aria-label="Panou principal Urban Conect">
-            <div
-              className="sheet-grabber"
-              role="button"
-              tabIndex={0}
-              aria-label="Glisează sau apasă pentru a ajusta înălțimea panoului mobil"
-              onPointerDown={e => {
-                sheetDragStartY.current = e.clientY;
-                sheetDragged.current = false;
-                (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-              }}
-              onPointerMove={e => {
-                if (sheetDragStartY.current === null) return;
-                if (Math.abs(e.clientY - sheetDragStartY.current) > 18) {
-                  sheetDragged.current = true;
-                }
-              }}
-              onPointerUp={e => {
-                if (sheetDragStartY.current === null) return;
-                const dy = e.clientY - sheetDragStartY.current;
-                sheetDragStartY.current = null;
-                if (dy < -28) {
-                  setMobilePanelOpen(true);
-                  setMobileSheetSnap(curr => (curr === 'peek' ? 'half' : 'full'));
-                } else if (dy > 28) {
-                  setMobileSheetSnap(curr => (curr === 'full' ? 'half' : 'peek'));
-                }
-              }}
-              onClick={() => {
-                if (sheetDragged.current) {
-                  sheetDragged.current = false;
-                  return;
-                }
-                if (!mobilePanelOpen) {
-                  setMobilePanelOpen(true);
-                  setMobileSheetSnap('half');
-                } else {
-                  setMobileSheetSnap(curr => (curr === 'peek' ? 'half' : curr === 'half' ? 'full' : 'peek'));
-                }
-              }}
-            >
-              <span />
-              <div className="mobile-sheet-snap-pills">
-                <small>
-                  {mobileSheetSnap === 'peek'
-                    ? '30% · Glisează în sus'
-                    : mobileSheetSnap === 'half'
-                      ? '54% · Glisează sus / jos'
-                      : '90% · Glisează în jos'}
-                </small>
-              </div>
-            </div>
+            <MobileSheetHandle snap={mobileSheetSnap} onSnap={setMobileSheetSnap} />
 
             {/* Primary 6-Module Navigation Tabs */}
             <div className="sidebar-tabs" role="tablist" aria-label="Secțiuni Urban Conect">

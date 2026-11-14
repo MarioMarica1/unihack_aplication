@@ -1624,11 +1624,18 @@
   .map-floating-pills { top: 8px; left: 8px; right: 8px; }
   .map-chip { height: 32px; padding: 0 9px; font-size: 11px; }
   .sheet-grabber {
-    display: flex;
-    justify-content: center;
-    padding: 8px 0 2px;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 4px;
+    width: 100%;
+    min-height: 44px;
     flex-shrink: 0;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
   }
+  [data-sheet-dragging] .sheet-grabber { cursor: grabbing; }
   .sheet-grabber span {
     width: 36px;
     height: 4px;
@@ -2241,42 +2248,10 @@
   box-shadow: 0 2px 6px rgba(5, 150, 105, 0.28);
 }
 
-/* Dedicated Mobile Bottom Sheet Snap States */
 .mobile-sheet-snap-pills {
-  display: none;
-}
-
-@media (max-width: 760px) {
-  .sheet-grabber {
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 0 4px;
-  }
-
-  .mobile-sheet-snap-pills {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.68rem;
-    font-weight: 700;
-    color: #64748b;
-    letter-spacing: 0.02em;
-  }
-
-  .app-shell.panel-open.sheet-snap-peek .discovery {
-    max-height: 22vh;
-  }
-
-  .app-shell.panel-open.sheet-snap-half .discovery {
-    max-height: 52vh;
-  }
-
-  .app-shell.panel-open.sheet-snap-full .discovery {
-    max-height: 84vh;
-  }
+  font-size: .68rem;
+  font-weight: 700;
+  color: var(--ink-muted);
 }
 
 
@@ -3439,20 +3414,6 @@ html[data-theme='dark'] .ai-composer input {
     backdrop-filter: blur(20px) saturate(175%);
     -webkit-backdrop-filter: blur(20px) saturate(175%);
     box-shadow: 0 -8px 32px rgba(15, 23, 42, 0.14);
-    transition: max-height 0.34s var(--ease-spatial), transform 0.34s var(--ease-spatial), opacity 0.25s ease;
-  }
-  .app-shell.panel-open.sheet-snap-peek .discovery {
-    max-height: 30dvh;
-  }
-  .app-shell.panel-open.sheet-snap-half .discovery {
-    max-height: 54dvh;
-  }
-  .app-shell.panel-open.sheet-snap-full .discovery {
-    max-height: 90dvh;
-  }
-  .sheet-grabber {
-    touch-action: none;
-    user-select: none;
   }
   .app-shell.map-first .ai-assistant-panel {
     z-index: 55;
@@ -3807,13 +3768,22 @@ html[data-theme='dark'] .ai-composer input {
 
 @media (max-width: 760px) {
   .app-shell.map-first {
+    --mobile-sheet-peek-ratio: .30;
+    --mobile-sheet-half-ratio: .54;
+    --mobile-sheet-full-ratio: .86;
+    --mobile-sheet-top-reserve: 134px;
+    --mobile-sheet-half: calc(100dvh * var(--mobile-sheet-half-ratio));
+    --mobile-sheet-height: var(--mobile-sheet-half);
     --mobile-controls-bottom: 18px;
   }
-  .app-shell.map-first.panel-open.sheet-snap-peek {
-    --mobile-controls-bottom: calc(30dvh + 12px);
+  .app-shell.map-first.sheet-snap-peek {
+    --mobile-sheet-height: calc(100dvh * var(--mobile-sheet-peek-ratio));
   }
-  .app-shell.map-first.panel-open.sheet-snap-half {
-    --mobile-controls-bottom: calc(54dvh + 12px);
+  .app-shell.map-first.sheet-snap-full {
+    --mobile-sheet-height: clamp(var(--mobile-sheet-half), calc(100dvh - var(--mobile-sheet-top-reserve)), calc(100dvh * var(--mobile-sheet-full-ratio)));
+  }
+  .app-shell.map-first.panel-open {
+    --mobile-controls-bottom: calc(var(--mobile-sheet-drag-height, var(--mobile-sheet-height)) + 12px);
   }
   .app-shell.map-first .workspace {
     position: relative;
@@ -3840,7 +3810,7 @@ html[data-theme='dark'] .ai-composer input {
   .app-shell.map-first .maplibregl-ctrl-bottom-right,
   .app-shell.map-first .maplibregl-ctrl-bottom-left {
     bottom: var(--mobile-controls-bottom);
-    transition: bottom 0.34s var(--ease-spatial), opacity 0.2s ease;
+    transition: bottom .28s var(--ease-spatial), opacity .2s ease;
   }
   .app-shell.map-first.panel-open.sheet-snap-full :is(.map-utility-controls, .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left) {
     opacity: 0;
@@ -3848,24 +3818,20 @@ html[data-theme='dark'] .ai-composer input {
   }
   .app-shell.map-first .discovery {
     bottom: var(--mobile-nav-height);
-    height: 54dvh;
-    max-height: 54dvh;
-    transition: height 0.34s var(--ease-spatial), max-height 0.34s var(--ease-spatial), transform 0.34s var(--ease-spatial), opacity 0.25s ease;
+    height: var(--mobile-sheet-drag-height, var(--mobile-sheet-height));
+    max-height: none;
+    transition: height .28s var(--ease-spatial), transform .28s var(--ease-spatial), visibility .28s;
   }
-  .app-shell.panel-open.sheet-snap-peek .discovery {
-    height: 30dvh;
-    max-height: 30dvh;
-  }
-  .app-shell.panel-open.sheet-snap-half .discovery {
-    height: 54dvh;
-    max-height: 54dvh;
-  }
-  .app-shell.panel-open.sheet-snap-full .discovery {
-    height: calc(100dvh - 134px);
-    max-height: 86dvh;
+  .app-shell.map-first[data-sheet-dragging] :is(.discovery, .map-utility-controls, .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left) {
+    transition: none;
   }
   .app-shell.map-first.panel-open.sheet-snap-full :is(.theme-toggle, .ai-assistant-toggle:not(.active)) {
     opacity: 0;
     pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .app-shell.map-first :is(.discovery, .map-utility-controls, .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left) {
+      transition: none;
+    }
   }
 }

@@ -501,9 +501,9 @@ export default function App({ cloud }: { cloud?: Cloud }) {
             </>}
             <div className="results-heading"><span className="results-count">{communityResults.length} {view === 'saved' ? 'salvate' : 'Anunțuri'}</span>
               <div className="community-filter-controls">
-              {view === 'explore' && <button type="button" className="secondary municipal-filter-toggle" role="switch" aria-checked={municipalEnabled} onClick={() => setMunicipalEnabled(enabled => !enabled)}>
+              {view === 'explore' && community.report && <button type="button" className="secondary municipal-filter-toggle" role="switch" aria-checked={municipalEnabled} onClick={() => setMunicipalEnabled(enabled => !enabled)}>
                 <span className="switch" aria-hidden="true"><i /></span>
-                <span>Incluse sesizările Primăriei</span>
+                <span>Sesizarile Primariei</span>
               </button>}
               <details className="list-options">
                 <summary><ArrowDownUp size={14} />Filtre</summary>

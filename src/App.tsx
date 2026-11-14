@@ -2131,11 +2131,8 @@ export default function App({
                           <span>
                             <strong>{selectedCityEvent.venue}</strong>
                             <small>
-                              Distanță față de Punctul A:{' '}
-                              {Math.round(
-                                distance({ lon: selectedCityEvent.lon, lat: selectedCityEvent.lat }, pointA.location),
-                              )}{' '}
-                              m
+                              {selectedCityEvent.category} · Timișoara ({selectedCityEvent.lat.toFixed(5)},{' '}
+                              {selectedCityEvent.lon.toFixed(5)})
                             </small>
                           </span>
                         </div>
@@ -2960,8 +2957,7 @@ export default function App({
                             <h3>{ev.title}</h3>
                             <span className="place">
                               <MapPin size={12} />
-                              {ev.venue} <span className="dot" />{' '}
-                              {Math.round(distance({ lon: ev.lon, lat: ev.lat }, pointA.location))} m
+                              {ev.venue}
                             </span>
                             <div className="card-date">
                               <Calendar size={12} />

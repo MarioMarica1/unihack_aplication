@@ -31,9 +31,11 @@ const timisoaraVenues: Array<{
   { pattern: /cinema timiș|cinema timis/i, venue: 'Cinema Timiș (Piața Victoriei 7)', lat: 45.75152, lon: 21.22551 },
   { pattern: /cinema studio|nikolaus lenau/i, venue: 'Cinema Studio (Str. Nikolaus Lenau 2)', lat: 45.75243, lon: 21.22604 },
   { pattern: /galeria\s*helios/i, venue: 'Galeria Helios (Piața Victoriei 6)', lat: 45.75201, lon: 21.22445 },
-  { pattern: /bastion|theresia|therezia|muzeul național al banatului/i, venue: 'Bastionul Maria Theresia (Str. Martin Luther 4)', lat: 45.75693, lon: 21.23461 },
+  { pattern: /bastion|theresia|therezia|martin luther|hector|muzeul național al banatului/i, venue: 'Bastionul Maria Theresia (Str. Hector nr. 1)', lat: 45.75678, lon: 21.23423 },
+  { pattern: /corneliu\s*miklo[sș]|take\s*ionescu\s*83|\bmx\b/i, venue: 'MX | Muzeul Corneliu Mikloși (Bd. Take Ionescu 83)', lat: 45.76300, lon: 21.24588 },
   { pattern: /unirii|muzeul de artă|baroc|sârb|tambure/i, venue: 'Piața Unirii / Muzeul Național de Artă', lat: 45.75723, lon: 21.22908 },
-  { pattern: /libertății|libertatii|garnizoan|galeria 5/i, venue: 'Piața Libertății / Galeria 5', lat: 45.75568, lon: 21.22730 },
+  { pattern: /galeria\s*5|vasile alecsandri|centrul de proiecte/i, venue: 'Centrul de Proiecte / Galeria 5 (Str. Vasile Alecsandri nr. 1)', lat: 45.75627, lon: 21.22777 },
+  { pattern: /libertății|libertatii|garnizoan/i, venue: 'Piața Libertății Timișoara', lat: 45.75568, lon: 21.22730 },
   { pattern: /sinagog/i, venue: 'Sinagoga din Cetate (Str. Mărășești 6)', lat: 45.75647, lon: 21.22613 },
   { pattern: /rozelor|parcul rozelor/i, venue: 'Parcul Rozelor Timișoara', lat: 45.74999, lon: 21.23239 },
   { pattern: /iulius|congress/i, venue: 'Iulius Town Timișoara', lat: 45.76638, lon: 21.22839 },
@@ -63,6 +65,103 @@ function decodeHtmlEntities(input: string): string {
     .replace(/<[^>]+>/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+const streetCoordsCache = new Map<string, { lat: number; lon: number } | null>();
+
+const romanianMonths: Record<string, number> = {
+  ianuarie: 1,
+  februarie: 2,
+  martie: 3,
+  aprilie: 4,
+  mai: 5,
+  iunie: 6,
+  iulie: 7,
+  august: 8,
+  septembrie: 9,
+  octombrie: 10,
+  noiembrie: 11,
+  decembrie: 12,
+};
+
+function parseRomanianDateIso(snippet: string): { startsAt?: string; endsAt?: string } {
+  const m = snippet.match(
+    /(\d{1,2})(?:\s*[–-]\s*(\d{1,2})(?:\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie))?)?\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie)\s+(\d{4})/i,
+  );
+  if (!m) return {};
+  const dayStart = Number(m[1]);
+  const dayEnd = m[2] ? Number(m[2]) : undefined;
+  const monthEnd = romanianMonths[(m[4] || '').toLowerCase()];
+  const monthStart = m[3] ? romanianMonths[m[3].toLowerCase()] : monthEnd;
+  const year = Number(m[5]);
+  if (!monthStart || !monthEnd || !year) return {};
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const startsAt = `${year}-${pad(monthStart)}-${pad(dayStart)}T10:00:00.000Z`;
+  const endsAt = dayEnd ? `${year}-${pad(monthEnd)}-${pad(dayEnd)}T20:00:00.000Z` : undefined;
+  return { startsAt, endsAt };
+}
+
+async function geocodeTimisoaraStreet(address: string): Promise<{ lat: number; lon: number } | null> {
+  const key = address.trim().toLowerCase();
+  if (!key) return null;
+  if (streetCoordsCache.has(key)) return streetCoordsCache.get(key) ?? null;
+
+  const clean = address.replace(/\bSAD\s*\d+\b/gi, '').replace(/,\s*nr\.?/gi, ' ').trim();
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&viewbox=21.14,45.82,21.32,45.69&bounded=1&q=${encodeURIComponent(`${clean}, Timișoara`)}`;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(2500),
+      headers: { 'User-Agent': 'UrbanConect/1.0' },
+    });
+    if (!res.ok) {
+      streetCoordsCache.set(key, null);
+      return null;
+    }
+    const items = (await res.json()) as Array<{ lat?: string; lon?: string }>;
+    const lat = Number(items[0]?.lat);
+    const lon = Number(items[0]?.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      const coords = { lat, lon };
+      streetCoordsCache.set(key, coords);
+      return coords;
+    }
+  } catch {
+    // fallback safely below
+  }
+  streetCoordsCache.set(key, null);
+  return null;
+}
+
+async function fetchCdpEventMetadata(link: string): Promise<{
+  venueName?: string;
+  streetAddress?: string;
+  startsAt?: string;
+  endsAt?: string;
+}> {
+  const pageUrl = link.replace('/eveniment/', '/evenimente/');
+  try {
+    const res = await fetch(pageUrl, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return {};
+    const html = await res.text();
+    const spaceMatch = html.match(/https:\/\/centruldeproiecte\.ro\/spatii\/[^"']+["'][^>]*>([^<]+)/i);
+    const streetMatch = html.match(/https:\/\/maps\.app\.goo\.gl\/[^"']+["'][^>]*>(?:<span[^>]*>)?([^<]+)/i);
+    const hostedIdx = html.indexOf('text_block-238-34608');
+    const dateSnippet =
+      hostedIdx > 0
+        ? html
+            .slice(Math.max(0, hostedIdx - 600), hostedIdx)
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+        : '';
+    const parsedDates = parseRomanianDateIso(dateSnippet);
+    return {
+      venueName: spaceMatch?.[1] ? decodeHtmlEntities(spaceMatch[1]) : undefined,
+      streetAddress: streetMatch?.[1] ? decodeHtmlEntities(streetMatch[1]) : undefined,
+      ...parsedDates,
+    };
+  } catch {
+    return {};
+  }
 }
 
 function resolveVenue(
@@ -147,23 +246,63 @@ async function fetchLiveCityEvents(): Promise<{ events: OfficialCityEvent[]; fet
   }
 
   if (cdpRes.status === 'fulfilled' && Array.isArray(cdpRes.value)) {
-    for (const item of cdpRes.value) {
+    const cdpItems = cdpRes.value.filter(item => {
       const title = decodeHtmlEntities(String(item.title?.rendered ?? ''));
-      if (!title || seenTitles.has(title.toLowerCase())) continue;
+      if (!title || seenTitles.has(title.toLowerCase())) return false;
       seenTitles.add(title.toLowerCase());
+      return true;
+    });
 
-      const link = String(item.link ?? 'https://centruldeproiecte.ro/');
-      const startsAt = item.date ? new Date(item.date).toISOString() : new Date().toISOString();
-      const venueInfo = resolveVenue(title, link, 'centrulDeProiecte');
+    // Fetch hosted space, street address & real date in small batches of 3 to avoid rate limits
+    const cdpMetaList: Array<Awaited<ReturnType<typeof fetchCdpEventMetadata>>> = [];
+    for (let i = 0; i < cdpItems.length; i += 3) {
+      const batch = cdpItems.slice(i, i + 3);
+      const settled = await Promise.all(
+        batch.map(item => fetchCdpEventMetadata(String(item.link ?? 'https://centruldeproiecte.ro/'))),
+      );
+      cdpMetaList.push(...settled);
+    }
+
+    for (let i = 0; i < cdpItems.length; i++) {
+      const item = cdpItems[i];
+      const meta = cdpMetaList[i] ?? {};
+      const title = decodeHtmlEntities(String(item.title?.rendered ?? ''));
+      const link = String(item.link ?? 'https://centruldeproiecte.ro/').replace('/eveniment/', '/evenimente/');
+      const startsAt =
+        meta.startsAt ?? (item.date ? new Date(item.date).toISOString() : new Date().toISOString());
+
+      const matchedVenue = resolveVenue(
+        `${title} ${meta.venueName ?? ''} ${meta.streetAddress ?? ''}`,
+        link,
+        'centrulDeProiecte',
+      );
+      let lat = matchedVenue.lat;
+      let lon = matchedVenue.lon;
+      let venueLabel = matchedVenue.venue;
+
+      if (meta.venueName || meta.streetAddress) {
+        venueLabel = meta.streetAddress
+          ? `${meta.venueName ?? 'Centrul de Proiecte Timișoara'} (${meta.streetAddress})`
+          : meta.venueName!;
+        const isDefaultFallback = matchedVenue === defaultSourceVenues.centrulDeProiecte;
+        if (meta.streetAddress && isDefaultFallback) {
+          const geocoded = await geocodeTimisoaraStreet(meta.streetAddress);
+          if (geocoded) {
+            lat = geocoded.lat;
+            lon = geocoded.lon;
+          }
+        }
+      }
 
       events.push({
         id: `cdp-${item.id ?? events.length}`,
         title,
         category: classifyEventCategory(item.class_list, title),
-        venue: venueInfo.venue,
-        lat: venueInfo.lat,
-        lon: venueInfo.lon,
+        venue: venueLabel,
+        lat,
+        lon,
         startsAt,
+        endsAt: meta.endsAt,
         source: 'Centrul de Proiecte PMT',
         officialUrl: link,
       });

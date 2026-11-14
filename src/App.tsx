@@ -77,6 +77,7 @@ import type { VeloStation } from './velo-live';
 import { useCityEvents } from './city-events';
 import type { OfficialCityEvent } from './city-events';
 import type { ActiveLineRoute, NetworkSubFilters } from './mobility-map';
+import { AiUrbanAssistant } from './AiUrbanAssistant';
 
 const MapCanvas = lazy(() => import('./MapCanvas'));
 
@@ -269,9 +270,10 @@ export default function App({
   // Official City Event Selected on Map / Feed
   const [selectedCityEvent, setSelectedCityEvent] = useState<OfficialCityEvent | null>(null);
 
-  // Search & Omni-Search
+  // Search & Omni-Search & Floating AI Urban Assistant
   const [search, setSearch] = useState('');
   const [omniSearchOpen, setOmniSearchOpen] = useState(false);
+  const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
 
   // Selection state (strictly reset on module switch!)
   const [selectedPinId, setSelectedPinId] = useState<string>('');
@@ -1639,6 +1641,63 @@ export default function App({
             )}
           </button>
         </div>
+
+        <AiUrbanAssistant
+          open={aiAssistantOpen}
+          onToggleOpen={() => setAiAssistantOpen(prev => !prev)}
+          activeModule={sidebarTab}
+          pointA={pointA}
+          pointB={pointB}
+          userLocation={userLocation}
+          routeCandidates={allRouteCandidates}
+          lineSummaries={lineSummaries}
+          liveVehicles={stptFeed.vehicles}
+          stptAlerts={stptFeed.alerts}
+          municipalReports={municipalSourceList}
+          veloStations={veloFeed.stations}
+          cityEvents={cityEventsFeed.events}
+          selectedVehicle={selectedVehicle}
+          selectedTransportLine={selectedTransportLine}
+          selectedTransportDirection={selectedTransportDirection}
+          selectedPlace={selectedPlace}
+          selectedMunicipal={selectedMunicipal}
+          municipalDetail={municipalDetail ?? undefined}
+          selectedPin={selected}
+          selectedVeloStation={selectedVeloStation}
+          selectedCityEvent={selectedCityEvent}
+          callbacks={{
+            onPlanRoute: ({ origin, destination, waypoints: nextWaypoints, mode }) => {
+              const targetMode = mode ?? travelMode;
+              const resolvedOrigin = origin ?? pointA;
+              const resolvedWaypoints = nextWaypoints ?? waypoints;
+              if (origin) {
+                setPointA(origin);
+                setPointAQuery(origin.title);
+              }
+              if (nextWaypoints) {
+                setWaypoints(nextWaypoints);
+                setWaypointQueries(nextWaypoints.map(w => w.title));
+              }
+              setTravelMode(targetMode);
+              switchModule('route');
+              setPointB(destination);
+              setPointBQuery(destination.title);
+              setRoute(undefined);
+              setTransitRoute(undefined);
+              void calculateRouteBetween(resolvedOrigin, destination, targetMode, resolvedWaypoints);
+            },
+            onSelectTransportLine: (line, direction) => {
+              switchModule('transport');
+              handleSelectTransportLine(line);
+              if (direction) setSelectedTransportDirection(direction);
+            },
+            onInspectPlace: place => {
+              switchModule('places');
+              setSelectedPlace(place);
+            },
+            onSwitchModule: tab => switchModule(tab),
+          }}
+        />
 
         <button
           type="button"

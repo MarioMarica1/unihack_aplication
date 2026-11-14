@@ -100,6 +100,13 @@
   background: #fff;
 }
 .map-first .list-options[open] summary { border-color: var(--brand-blue); color: var(--brand-hover); }
+.map-first .results-heading { flex-wrap: wrap; gap: 6px; }
+.community-filter-controls { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.map-first .municipal-filter-toggle { min-height: 34px; padding: 4px 7px; gap: 6px; line-height: 1.25; text-align: left; }
+.municipal-filter-toggle .switch { width: 26px; height: 16px; background: #687b8e; }
+.municipal-filter-toggle .switch i { width: 10px; height: 10px; }
+.municipal-filter-toggle[aria-checked=true] .switch { background: #277e64; }
+.municipal-filter-toggle[aria-checked=true] .switch i { transform: translateX(10px); }
 .map-first .card-main { padding-bottom: 0; }
 .map-first .card-top { min-height: 24px; padding-right: 83px; }
 .map-first .card-footer { gap: 8px; margin: 6px 19px 8px 20px; }
@@ -315,7 +322,7 @@
   .theme-toggle { right: 9px; }
   .map-first .community-create { min-height: 44px; }
   .map-first .discovery { width: 100%; }
-  .map-first .card-chat, .map-first .list-options summary { min-height: 44px; }
+  .map-first .card-chat, .map-first .list-options summary, .map-first .municipal-filter-toggle { min-height: 44px; }
   .map-first .card-top { padding-right: 100px; }
   .map-first .card-actions :is(.card-bookmark, .card-confirm) { min-width: 44px; height: 44px; }
   .pin-chat {

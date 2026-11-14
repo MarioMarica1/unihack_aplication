@@ -22,7 +22,7 @@ npm.cmd run build
 npm.cmd run preview -- --port 5174
 ```
 
-In **Comunitate → Filtre**, **Include sesizările Primăriei** is enabled by default. Public reports marked **Depusă** or **În lucru** from the last 30 days are refreshed every minute. Reports without coordinates appear in the list and each entry links to the municipal portal. Authors can mark their community reports **Raportată la Primărie** after submitting them there.
+In **Comunitate**, the **Incluse sesizările Primăriei** switch next to **Filtre** is enabled by default. Public reports marked **Depusă** or **În lucru** from the last 30 days are refreshed every minute. Reports without coordinates appear in the list and each entry links to the municipal portal. Authors can mark their community reports **Raportată la Primărie** after submitting them there.
 
 ## What the demo does
 

@@ -500,11 +500,17 @@ export default function App({ cloud }: { cloud?: Cloud }) {
               <div className="filter-tabs" role="group" aria-label="Tipuri de anunț afișate">{(['report', 'activity', 'discussion'] as const).map(type => <button key={type} className={community[type] ? `active ${type}` : type} aria-pressed={community[type]} onClick={() => chooseCommunity(type)}>{iconFor(type, 14)}{meta[type].plural}</button>)}</div>
             </>}
             <div className="results-heading"><span className="results-count">{communityResults.length} {view === 'saved' ? 'salvate' : 'Anunțuri'}</span>
+              <div className="community-filter-controls">
+              {view === 'explore' && <button type="button" className="secondary municipal-filter-toggle" role="switch" aria-checked={municipalEnabled} onClick={() => setMunicipalEnabled(enabled => !enabled)}>
+                <span className="switch" aria-hidden="true"><i /></span>
+                <span>Incluse sesizările Primăriei</span>
+              </button>}
               <details className="list-options">
                 <summary><ArrowDownUp size={14} />Filtre</summary>
                 <div className="list-options-body"><label className="checkbox-line"><input type="checkbox" checked={pinLabels} onChange={e => setPinLabels(e.target.checked)} />Arată numele pe hartă</label><label>Ordine<select value={sort} onChange={event => setSort(event.target.value === 'near' ? 'near' : 'recent')}><option value="recent">Cele mai recente</option><option value="near">{locationPoint ? 'Aproape de mine' : 'Aproape de centru'}</option></select></label>
-                {view === 'explore' && <label className="checkbox-line"><input type="checkbox" role="switch" checked={municipalEnabled} onChange={event => setMunicipalEnabled(event.target.checked)} />Include sesizările Primăriei</label>}{view === 'explore' && community.activity && <label className="checkbox-line"><input type="checkbox" checked={includePast} onChange={e => setIncludePast(e.target.checked)} />Include activități încheiate sau anulate</label>}</div>
+                {view === 'explore' && community.activity && <label className="checkbox-line"><input type="checkbox" checked={includePast} onChange={e => setIncludePast(e.target.checked)} />Include activități încheiate sau anulate</label>}</div>
               </details>
+              </div>
             </div>
             {municipalVisible && municipalReports.error && <div className="form-error" role="status">Sesizările Primăriei nu s-au putut actualiza. <button type="button" onClick={municipalReports.retry}>Reîncearcă</button></div>}<div className="pin-list">{communityResults.slice(0, visibleCount).map(result => {
               if (result.kind === 'municipal') {

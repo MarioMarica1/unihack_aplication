@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Camera, ExternalLink, Globe, Image as ImageIcon } from 'lucide-react';
 import { fetchPlacePhotos, getCachedPlacePhotos, getSatelliteTilePreview } from './place-photos';
@@ -96,6 +96,7 @@ export function PlaceCardThumb({ place, icon }: { place: PlaceRef; icon: ReactNo
 }
 
 export function PlacePhotoHero({ place }: { place: PlaceRef }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const [photos, setPhotos] = useState<PlacePhoto[]>(() => getCachedPlacePhotos(place.id) ?? []);
   const [loading, setLoading] = useState<boolean>(() => !getCachedPlacePhotos(place.id));
   const [activeIndex, setActiveIndex] = useState(0);
@@ -103,6 +104,9 @@ export function PlacePhotoHero({ place }: { place: PlaceRef }) {
   const [brokenUrls, setBrokenUrls] = useState<Record<string, true>>({});
 
   useEffect(() => {
+    const sc = rootRef.current?.closest('.sidebar-content, .detail-scroll');
+    if (sc) sc.scrollTop = 0;
+
     let cancelled = false;
     const cached = getCachedPlacePhotos(place.id);
     setActiveIndex(0);
@@ -136,7 +140,7 @@ export function PlacePhotoHero({ place }: { place: PlaceRef }) {
   const showingGroundPhoto = viewMode === 'photo' && Boolean(activePhoto);
 
   return (
-    <div className="place-hero-media">
+    <div ref={rootRef} className="place-hero-media">
       <div className="place-hero-stage">
         {showingGroundPhoto && activePhoto ? (
           <>

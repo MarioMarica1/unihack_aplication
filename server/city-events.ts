@@ -86,13 +86,15 @@ const romanianMonths: Record<string, number> = {
 
 function parseRomanianDateIso(snippet: string): { startsAt?: string; endsAt?: string } {
   const m = snippet.match(
-    /(\d{1,2})(?:\s*[–-]\s*(\d{1,2})(?:\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie))?)?\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie)\s+(\d{4})/i,
+    /(\d{1,2})(?:\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie))?(?:\s*[–-]\s*(\d{1,2}))?\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie)\s+(\d{4})/i,
   );
   if (!m) return {};
   const dayStart = Number(m[1]);
-  const dayEnd = m[2] ? Number(m[2]) : undefined;
-  const monthEnd = romanianMonths[(m[4] || '').toLowerCase()];
-  const monthStart = m[3] ? romanianMonths[m[3].toLowerCase()] : monthEnd;
+  const monthStartName = (m[2] || m[4] || '').toLowerCase();
+  const dayEnd = m[3] ? Number(m[3]) : undefined;
+  const monthEndName = (m[4] || '').toLowerCase();
+  const monthStart = romanianMonths[monthStartName];
+  const monthEnd = romanianMonths[monthEndName];
   const year = Number(m[5]);
   if (!monthStart || !monthEnd || !year) return {};
   const pad = (n: number) => String(n).padStart(2, '0');

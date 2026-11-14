@@ -70,8 +70,13 @@ export function TransportPanel({
     );
   }, [activeLineSummary, selectedDirection]);
 
+  const hasActiveSelection = Boolean(showAllRoutes || selectedLine || searchQuery.trim());
+
   const filteredVehicles = useMemo(() => {
     const q = searchQuery.trim().toLocaleLowerCase('ro');
+    if (!showAllRoutes && !selectedLine && !q) {
+      return [];
+    }
     return feed.vehicles.filter(v => {
       if (modeFilter !== 'all' && v.type !== modeFilter) return false;
       if (showAllRoutes) {
@@ -330,7 +335,7 @@ export function TransportPanel({
 
       <div className="filter-tabs">
         <button type="button" className={modeFilter === 'all' ? 'active' : ''} onClick={() => setModeFilter('all')}>
-          Toate ({feed.vehicles.length})
+          Toate liniile
         </button>
         <button type="button" className={modeFilter === 'tram' ? 'active' : ''} onClick={() => setModeFilter('tram')}>
           <TrainFront size={13} /> Tramvaie
@@ -401,8 +406,9 @@ export function TransportPanel({
       {/* Live Vehicles List */}
       <div className="vehicle-list-heading">
         <span>
-          {filteredVehicles.length} vehicule afișate pe hartă
-          {selectedLine && !showAllRoutes ? ` · Linia ${selectedLine} (${selectedDirection.toUpperCase()})` : ''}
+          {hasActiveSelection
+            ? `${filteredVehicles.length} vehicule afișate pe hartă${selectedLine && !showAllRoutes ? ` · Linia ${selectedLine} (${selectedDirection.toUpperCase()})` : ''}`
+            : 'Nicio linie selectată pe hartă'}
         </span>
       </div>
 
@@ -448,7 +454,16 @@ export function TransportPanel({
             </button>
           );
         })}
-        {filteredVehicles.length === 0 && (
+        {!hasActiveSelection && (
+          <div className="empty-state">
+            <Route size={26} />
+            <h3>Selectează o linie pentru a o afișa pe hartă</h3>
+            <p>
+              Alege orice linie de mai sus (ex. <strong>1</strong>, <strong>14</strong>, <strong>E2</strong>) pentru a randa pe hartă exclusiv traseul, stațiile (Tur / Retur) și vehiculele sale live, sau pornește comutatorul <strong>„Afișează Toate”</strong>.
+            </p>
+          </div>
+        )}
+        {hasActiveSelection && filteredVehicles.length === 0 && (
           <div className="empty-state">
             <Radio size={26} />
             <h3>Niciun vehicul activ pe selecția curentă</h3>

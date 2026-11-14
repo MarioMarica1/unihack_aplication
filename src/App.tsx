@@ -411,9 +411,11 @@ export default function App({
         });
         break;
       case 'transport':
+        setSelectedTransportLine('');
+        setShowAllTransportRoutes(false);
         setLayers({
-          tramways: showAllTransportRoutes,
-          busways: showAllTransportRoutes,
+          tramways: false,
+          busways: false,
           cycleways: false,
           sidewalks: false,
           places: false,
@@ -630,7 +632,7 @@ export default function App({
         return true;
       });
     }
-    return stptFeed.vehicles;
+    return [];
   }, [
     sidebarTab,
     transitRoute,
@@ -3186,7 +3188,9 @@ export default function App({
                     : sidebarTab === 'transport'
                       ? selectedTransportLine && !showAllTransportRoutes
                         ? `Linia ${selectedTransportLine} (${selectedTransportDirection.toUpperCase()})`
-                        : 'Rețea Transport STPT'
+                        : showAllTransportRoutes
+                          ? 'Rețea Transport STPT (Filtru Activ)'
+                          : 'Transport STPT (Selectează o linie)'
                       : sidebarTab === 'velo'
                         ? 'VeloTM & Piste Ciclo'
                         : sidebarTab === 'reports'

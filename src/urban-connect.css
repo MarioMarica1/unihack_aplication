@@ -2273,3 +2273,12 @@
     max-height: 84vh;
   }
 }
+
+
+/* Gemini Route Chat Styles */
+.route-chat { margin-bottom: 12px; }
+.route-chat summary { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--brand-blue); min-height: 44px; font-weight: 650; }
+.route-chat-log { display: grid; gap: 6px; }
+.route-chat-log .message { padding: 8px; overflow-wrap: anywhere; font-size: 13px; }
+.route-chat .message-composer { position: static; padding: 6px 0; }
+.route-chat .message-composer input { min-width: 0; }

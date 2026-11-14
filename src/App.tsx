@@ -54,6 +54,7 @@ import type { LiveVehicle } from './stpt-live';
 import { getLineSummaries, loadTransitNetwork, planTransit } from './transitRouter';
 import type { LineSummary, TransitNetwork, TransitOption, TransitPoint } from './transitRouter';
 import TransitResults from './TransitResults';
+import RouteChat from './RouteChat';
 import { municipalReportsPortal, municipalReportUrl, municipalStatuses } from './municipal-reports';
 import type { MunicipalStatus } from './municipal-reports';
 import { useMunicipalReportDetail, useMunicipalReports } from './useMunicipalReports';
@@ -2171,6 +2172,28 @@ export default function App({
                       Alege modul de deplasare, setează Punctul A (Plecare) și Punctul B (Destinația) sau inversează ruta cu butonul central Swap.
                     </p>
                   </div>
+
+                  <RouteChat
+                    catalog={placeFeatures}
+                    onPlan={(origin, stops, mode) => {
+                      const nextMode = mode ?? travelMode;
+                      if (mode) setTravelMode(mode);
+                      const nextA = origin
+                        ? { location: origin.location, title: origin.title }
+                        : pointA;
+                      if (origin) {
+                        setPointA(nextA);
+                        setPointAQuery(nextA.title);
+                      }
+                      const destPlace = stops[stops.length - 1];
+                      if (destPlace) {
+                        const nextB = { location: destPlace.location, title: destPlace.title };
+                        setPointB(nextB);
+                        setPointBQuery(nextB.title);
+                        void calculateRouteBetween(nextA, nextB, nextMode);
+                      }
+                    }}
+                  />
 
                   <div className="travel-mode-picker" role="group" aria-label="Mod de deplasare">
                     <button

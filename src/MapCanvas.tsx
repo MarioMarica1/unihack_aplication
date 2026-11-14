@@ -87,10 +87,15 @@ function syncSatelliteLayer(map: maplibregl.Map, enabled: boolean) {
   if (!map.getSource(satelliteSourceId)) {
     map.addSource(satelliteSourceId, {
       type: 'raster',
-      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      tiles: [
+        'https://mt0.google.com/vt/lyrs=s&hl=ro&x={x}&y={y}&z={z}',
+        'https://mt1.google.com/vt/lyrs=s&hl=ro&x={x}&y={y}&z={z}',
+        'https://mt2.google.com/vt/lyrs=s&hl=ro&x={x}&y={y}&z={z}',
+        'https://mt3.google.com/vt/lyrs=s&hl=ro&x={x}&y={y}&z={z}',
+      ],
       tileSize: 256,
-      maxzoom: 19,
-      attribution: 'Esri World Imagery',
+      maxzoom: 21,
+      attribution: 'Imagistică Satelit © Google Earth / CNES / Airbus',
     });
   }
   if (!map.getLayer(satelliteLayerId)) {
@@ -103,7 +108,7 @@ function syncSatelliteLayer(map: maplibregl.Map, enabled: boolean) {
         type: 'raster',
         source: satelliteSourceId,
         layout: { visibility: enabled ? 'visible' : 'none' },
-        paint: { 'raster-opacity': 0.92 },
+        paint: { 'raster-opacity': 0.98 },
       },
       firstRoadOrLabel,
     );
@@ -116,6 +121,37 @@ function baseLayers(map: maplibregl.Map, props: Props) {
   const mode = props.baseMapStyle ?? (props.buildings ? 'buildings3d' : 'minimal');
   const showBuildings = mode === 'buildings3d' || (props.buildings && mode !== 'minimal' && mode !== 'satellite');
   const show3dExtrusions = mode === 'buildings3d';
+
+  if (!map.getLayer('building-3d')) {
+    const styleLayers = map.getStyle().layers;
+    const buildingFill = styleLayers.find(
+      l => l.id === 'building' || (l.type === 'fill' && 'source-layer' in l && l['source-layer'] === 'building'),
+    );
+    const firstSymbolId = styleLayers.find(l => l.type === 'symbol')?.id;
+    if (buildingFill && 'source' in buildingFill) {
+      map.addLayer(
+        {
+          id: 'building-3d',
+          type: 'fill-extrusion',
+          source: buildingFill.source,
+          'source-layer': 'building',
+          minzoom: 13,
+          filter: ['!', ['has', 'hide_3d']],
+          layout: {
+            visibility: showBuildings && show3dExtrusions ? 'visible' : 'none',
+          },
+          paint: {
+            'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+            'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 12],
+            'fill-extrusion-color': props.theme === 'dark' ? '#3b4c63' : 'hsl(35,8%,85%)',
+            'fill-extrusion-opacity': props.theme === 'dark' ? 0.88 : 0.82,
+          },
+        },
+        firstSymbolId,
+      );
+    }
+  }
+
   applyBaseStyle(map, {
     buildings: showBuildings,
     buildings3d: show3dExtrusions,
@@ -360,39 +396,64 @@ export default function MapCanvas(props: Props) {
     });
   }, [props.selectedVeloStation?.id, attempt]);
 
-  // Official Municipal & Cultural Event Markers on the map
+  // Official Municipal & Cultural Event Markers on the map (with radial offset for shared venues)
   useEffect(() => {
     const instance = map.current;
     if (!instance || !props.cityEvents?.length) return;
+    const venueGroups = new Map<string, OfficialCityEvent[]>();
+    for (const ev of props.cityEvents) {
+      const key = `${ev.lon.toFixed(4)},${ev.lat.toFixed(4)}`;
+      const list = venueGroups.get(key) ?? [];
+      list.push(ev);
+      venueGroups.set(key, list);
+    }
+
     const markers = props.cityEvents.map(ev => {
+      const key = `${ev.lon.toFixed(4)},${ev.lat.toFixed(4)}`;
+      const siblings = venueGroups.get(key) ?? [ev];
+      const indexInVenue = siblings.indexOf(ev);
+      let lon = ev.lon;
+      let lat = ev.lat;
+      if (siblings.length > 1 && indexInVenue > 0) {
+        const angle = (2 * Math.PI * indexInVenue) / siblings.length;
+        const ring = 1 + Math.floor((indexInVenue - 1) / 8) * 0.65;
+        lon += Math.cos(angle) * 0.00034 * ring;
+        lat += Math.sin(angle) * 0.00024 * ring;
+      }
+
       const button = document.createElement('button');
       button.type = 'button';
       const isSelected = props.selectedCityEvent?.id === ev.id;
       button.className = `city-event-map-marker ${isSelected ? 'selected' : ''}`;
-      const dateStr = ev.startsAt.slice(0, 10);
+      const dateStr = ev.startsAt.slice(5, 10).split('-').reverse().join('.');
       button.title = `${ev.title} (${dateStr}${ev.timeLabel ? ` · ${ev.timeLabel}` : ''}) — ${ev.venue}`;
       button.setAttribute('aria-label', button.title);
 
       const badge = document.createElement('span');
       badge.className = 'city-event-marker-badge';
-      badge.textContent = '🎭';
+      badge.innerHTML =
+        '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z"/><path d="m8 15 2 2 5-5"/></svg>';
+
+      const dateChip = document.createElement('span');
+      dateChip.className = 'city-event-marker-date';
+      dateChip.textContent = dateStr;
 
       const copy = document.createElement('span');
       copy.className = 'city-event-marker-copy';
       const dateTag = document.createElement('small');
-      dateTag.textContent = `${dateStr} · ${ev.venue}`;
+      dateTag.textContent = `${dateStr}${ev.timeLabel ? ` · ${ev.timeLabel}` : ''} · ${ev.venue}`;
       const titleTag = document.createElement('strong');
-      titleTag.textContent = ev.title.length > 34 ? `${ev.title.slice(0, 32)}…` : ev.title;
+      titleTag.textContent = ev.title.length > 42 ? `${ev.title.slice(0, 40)}…` : ev.title;
       copy.append(dateTag, titleTag);
 
-      button.append(badge, copy);
+      button.append(badge, dateChip, copy);
       button.addEventListener('click', clickEv => {
         clickEv.stopPropagation();
         latest.current.onSelectCityEvent?.(ev);
       });
 
       return new maplibregl.Marker({ element: button, anchor: 'center' })
-        .setLngLat([ev.lon, ev.lat])
+        .setLngLat([lon, lat])
         .addTo(instance);
     });
     return () => markers.forEach(marker => marker.remove());
@@ -402,7 +463,7 @@ export default function MapCanvas(props: Props) {
     if (!props.selectedCityEvent || !map.current) return;
     map.current.easeTo({
       center: [props.selectedCityEvent.lon, props.selectedCityEvent.lat],
-      zoom: Math.max(map.current.getZoom(), 15.8),
+      zoom: Math.max(map.current.getZoom(), 16.2),
       duration: 480,
     });
   }, [props.selectedCityEvent?.id, attempt]);
@@ -411,7 +472,7 @@ export default function MapCanvas(props: Props) {
     const instance = map.current;
     if (!instance || !styleReady.current) return;
     baseLayers(instance, props);
-    if (lastBaseStyle.current !== props.baseMapStyle) {
+    if (lastBaseStyle.current !== props.baseMapStyle || (props.tab === 'places' && props.baseMapStyle === 'buildings3d' && instance.getPitch() < 25)) {
       lastBaseStyle.current = props.baseMapStyle;
       if (props.baseMapStyle === 'buildings3d') {
         instance.easeTo({

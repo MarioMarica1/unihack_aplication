@@ -46,6 +46,10 @@ export function applyBaseStyle(
         map.setPaintProperty(layer.id, 'fill-color', options.dark ? '#2b3646' : '#e8ded2');
         map.setPaintProperty(layer.id, 'fill-outline-color', options.dark ? '#202936' : '#cfbfad');
         if (options.dark) map.setPaintProperty(layer.id, 'fill-opacity', 0.72);
+      } else if (layer.type === 'fill-extrusion') {
+        map.setLayerZoomRange(layer.id, 13, 24);
+        map.setPaintProperty(layer.id, 'fill-extrusion-color', options.dark ? '#3b4c63' : 'hsl(35,8%,85%)');
+        map.setPaintProperty(layer.id, 'fill-extrusion-opacity', options.dark ? 0.88 : 0.82);
       }
     }
     if (isBasePlaceLayer(layer)) {

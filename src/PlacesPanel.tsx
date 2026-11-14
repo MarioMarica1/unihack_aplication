@@ -345,21 +345,6 @@ export default function PlacesPanel({
             </div>
           )}
 
-          <div className="place-category-pills" role="group" aria-label="Categorii de locuri">
-            {categories.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                className={category === key ? 'active' : ''}
-                aria-pressed={category === key}
-                onClick={() => { setCategory(key); setLimit(40); }}
-              >
-                <PlaceIcon kind={key} size={14} />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
-
           <label className="place-category-filter">
             <PlaceIcon kind={category} size={17} />
             <span id="place-category-label">Categorie</span>

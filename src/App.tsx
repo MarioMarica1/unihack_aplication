@@ -27,7 +27,6 @@ import {
   Search,
   Send,
   Share2,
-  SlidersHorizontal,
   Sparkles,
   Sun,
   ThumbsUp,
@@ -233,7 +232,16 @@ export default function App({
 
   // Decoupled Community Filters (official events, citizen activities & discussions — zero reports!)
   const [communityFilter, setCommunityFilter] = useState<'all' | 'official' | 'activity' | 'discussion' | 'saved'>('all');
+  const [communityEventCategory, setCommunityEventCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'active' | 'near'>('newest');
+  const [savedEventIds, setSavedEventIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('urban-conect-saved-events');
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Decoupled Reports Filters
   const [reportsSourceFilter, setReportsSourceFilter] = useState<'all' | 'municipal' | 'citizen'>('all');
@@ -453,6 +461,7 @@ export default function App({
           sidewalks: false,
           places: false,
         });
+        setMapFit(v => v + 1);
         break;
       case 'places':
         setLayers({
@@ -665,14 +674,36 @@ export default function App({
       });
   }, [communityPostPins, communityFilter, savedIds, search, sortBy, pointA.location, state?.messages]);
 
+  // Available Official Event Categories with live counts
+  const availableCityEventCategories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const ev of cityEventsFeed.events) {
+      counts.set(ev.category, (counts.get(ev.category) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [cityEventsFeed.events]);
+
   // Filtered Official Municipal & Cultural Events for Community tab
   const visibleCityEvents = useMemo(() => {
-    if (communityFilter === 'discussion' || communityFilter === 'saved') return [];
+    if (communityFilter === 'activity' || communityFilter === 'discussion') return [];
     const q = search.trim().toLowerCase();
-    return cityEventsFeed.events.filter(
-      ev => !q || `${ev.title} ${ev.venue} ${ev.category} ${ev.source}`.toLowerCase().includes(q),
-    );
-  }, [cityEventsFeed.events, communityFilter, search]);
+    return cityEventsFeed.events
+      .filter(ev => {
+        if (communityFilter === 'saved' && !savedEventIds.includes(ev.id)) return false;
+        if (communityEventCategory !== 'all' && ev.category !== communityEventCategory) return false;
+        if (q && !`${ev.title} ${ev.venue} ${ev.category} ${ev.source}`.toLowerCase().includes(q)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'near') {
+          return (
+            distance({ lon: a.lon, lat: a.lat }, pointA.location) -
+            distance({ lon: b.lon, lat: b.lat }, pointA.location)
+          );
+        }
+        return a.startsAt.localeCompare(b.startsAt);
+      });
+  }, [cityEventsFeed.events, communityFilter, communityEventCategory, savedEventIds, search, sortBy, pointA.location]);
 
   // Filtered Citizen Reports
   const visibleCitizenReports = useMemo(() => {
@@ -866,6 +897,56 @@ export default function App({
       startsAt: type === 'activity' ? toLocalInput() : undefined,
       endsAt: type === 'activity' ? toLocalInput(new Date(Date.now() + 90000000).toISOString()) : undefined,
       capacity: type === 'activity' ? 15 : undefined,
+    });
+    setFormError('');
+    setModal('create-community');
+  }
+
+  function toggleSaveCityEvent(eventId: string, clickEv?: ReactMouseEvent) {
+    clickEv?.stopPropagation();
+    setSavedEventIds(prev => {
+      const exists = prev.includes(eventId);
+      const next = exists ? prev.filter(id => id !== eventId) : [...prev, eventId];
+      try {
+        localStorage.setItem('urban-conect-saved-events', JSON.stringify(next));
+      } catch {
+        // ignore storage error
+      }
+      setToast({
+        text: exists ? 'Evenimentul a fost eliminat din Salvate.' : 'Evenimentul a fost salvat în lista ta.',
+      });
+      return next;
+    });
+  }
+
+  function findDiscussionForCityEvent(ev: OfficialCityEvent): Pin | undefined {
+    const titlePrefix = `discuție: ${ev.title.toLowerCase().slice(0, 28)}`;
+    return communityPostPins.find(
+      p =>
+        p.type === 'discussion' &&
+        (p.relatedId === ev.id || p.title.toLowerCase().includes(titlePrefix)),
+    );
+  }
+
+  function startOrOpenEventDiscussion(ev: OfficialCityEvent, clickEv?: ReactMouseEvent) {
+    clickEv?.stopPropagation();
+    const existing = findDiscussionForCityEvent(ev);
+    if (existing) {
+      setSelectedCityEvent(null);
+      selectPin(existing.id);
+      setChatPinId(existing.id);
+      return;
+    }
+    if (!requireAuthenticatedUser()) return;
+    const startStr = dateLabel(ev.startsAt, { day: 'numeric', month: 'short', year: 'numeric' });
+    setForm({
+      type: 'discussion',
+      title: `Discuție: ${ev.title}`.slice(0, 95),
+      category: 'Recomandări',
+      place: ev.venue.slice(0, 95),
+      location: { lon: ev.lon, lat: ev.lat },
+      description: `Discuție comunitară despre evenimentul „${ev.title}” organizat la ${ev.venue} (${startStr}${ev.timeLabel ? `, ora ${ev.timeLabel}` : ''}). Cine participă sau are recomandări?`,
+      relatedId: ev.id,
     });
     setFormError('');
     setModal('create-community');
@@ -1833,6 +1914,141 @@ export default function App({
                     </div>
                   </div>
                 </aside>
+              ) : selectedCityEvent ? (
+                <aside className="detail-panel" aria-label="Detalii eveniment oficial">
+                  <div className="detail-toolbar">
+                    <button type="button" className="secondary" onClick={() => setSelectedCityEvent(null)}>
+                      Înapoi la listă
+                    </button>
+                    <span>Eveniment Oficial Timișoara</span>
+                    <div className="detail-tools">
+                      <button
+                        type="button"
+                        className={`icon-btn ${savedEventIds.includes(selectedCityEvent.id) ? 'bookmarked' : ''}`}
+                        aria-label="Salvează evenimentul"
+                        title="Salvează evenimentul"
+                        onClick={e => toggleSaveCityEvent(selectedCityEvent.id, e)}
+                      >
+                        <Bookmark size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        aria-label="Închide"
+                        onClick={() => setSelectedCityEvent(null)}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="detail-scroll">
+                    <div className="detail-content">
+                      <div className="detail-badges">
+                        <span className="type-label activity">
+                          <Ticket size={13} /> Eveniment Oficial
+                        </span>
+                        <span className="status-badge">{selectedCityEvent.category}</span>
+                        <span className="official-source-chip">{selectedCityEvent.source}</span>
+                      </div>
+
+                      <h2>{selectedCityEvent.title}</h2>
+
+                      <div className="detail-place">
+                        <MapPin size={14} />
+                        <span>
+                          {selectedCityEvent.venue} · {selectedCityEvent.lat.toFixed(4)}, {selectedCityEvent.lon.toFixed(4)}
+                        </span>
+                      </div>
+
+                      <div className="activity-facts" style={{ marginTop: 14 }}>
+                        <div>
+                          <Calendar size={16} />
+                          <span>
+                            <strong>
+                              {dateLabel(selectedCityEvent.startsAt, {
+                                day: 'numeric',
+                                month: 'long',
+                                year: 'numeric',
+                              })}
+                              {selectedCityEvent.timeLabel ? ` · ora ${selectedCityEvent.timeLabel}` : ''}
+                            </strong>
+                            <small>Organizator / Sursă: {selectedCityEvent.source}</small>
+                          </span>
+                        </div>
+                        <div>
+                          <MapPin size={16} />
+                          <span>
+                            <strong>{selectedCityEvent.venue}</strong>
+                            <small>
+                              Distanță față de Punctul A:{' '}
+                              {Math.round(
+                                distance({ lon: selectedCityEvent.lon, lat: selectedCityEvent.lat }, pointA.location),
+                              )}{' '}
+                              m
+                            </small>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="route-actions">
+                        <button
+                          type="button"
+                          className="primary full"
+                          onClick={e => startOrOpenEventDiscussion(selectedCityEvent, e)}
+                        >
+                          <MessageSquare size={16} />
+                          {findDiscussionForCityEvent(selectedCityEvent)
+                            ? 'Deschide discuția comunității despre eveniment'
+                            : 'Pornește o discuție pe baza acestui eveniment'}
+                        </button>
+
+                        <button
+                          type="button"
+                          className={`secondary full ${savedEventIds.includes(selectedCityEvent.id) ? 'supported' : ''}`}
+                          onClick={e => toggleSaveCityEvent(selectedCityEvent.id, e)}
+                        >
+                          <Bookmark size={16} />
+                          {savedEventIds.includes(selectedCityEvent.id)
+                            ? 'Eveniment salvat în lista ta'
+                            : 'Salvează evenimentul'}
+                        </button>
+
+                        <button
+                          type="button"
+                          className="secondary full"
+                          onClick={() =>
+                            startRouteToDestination({
+                              location: { lon: selectedCityEvent.lon, lat: selectedCityEvent.lat },
+                              title: `${selectedCityEvent.title} (${selectedCityEvent.venue})`,
+                            })
+                          }
+                        >
+                          <Navigation size={15} /> Navighează la eveniment (A → B)
+                        </button>
+
+                        {selectedCityEvent.ticketsUrl && (
+                          <a
+                            className="secondary full"
+                            href={selectedCityEvent.ticketsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Rezervă / Cumpără bilete <ExternalLink size={15} />
+                          </a>
+                        )}
+
+                        <a
+                          className="secondary full"
+                          href={selectedCityEvent.officialUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Pagina oficială a evenimentului <ExternalLink size={15} />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </aside>
               ) : selected ? (
                 <aside className="detail-panel" aria-label="Detalii">
                   <div className="detail-toolbar">
@@ -2423,70 +2639,120 @@ export default function App({
                     <button
                       type="button"
                       className={communityFilter === 'all' ? 'active' : ''}
-                      onClick={() => setCommunityFilter('all')}
+                      onClick={() => {
+                        setCommunityFilter('all');
+                        setCommunityEventCategory('all');
+                        setMapFit(v => v + 1);
+                      }}
                     >
                       Toate ({communityPostPins.length + cityEventsFeed.events.length})
                     </button>
                     <button
                       type="button"
                       className={communityFilter === 'official' ? 'active' : ''}
-                      onClick={() => setCommunityFilter('official')}
+                      onClick={() => {
+                        setCommunityFilter('official');
+                        setMapFit(v => v + 1);
+                      }}
                     >
                       <Ticket size={13} /> Agenda Oficială ({cityEventsFeed.events.length})
                     </button>
                     <button
                       type="button"
                       className={`activity ${communityFilter === 'activity' ? 'active' : ''}`}
-                      onClick={() => setCommunityFilter('activity')}
+                      onClick={() => {
+                        setCommunityFilter('activity');
+                        setMapFit(v => v + 1);
+                      }}
                     >
                       <Calendar size={13} /> Activități ({communityPostPins.filter(p => p.type === 'activity').length})
                     </button>
                     <button
                       type="button"
                       className={`discussion ${communityFilter === 'discussion' ? 'active' : ''}`}
-                      onClick={() => setCommunityFilter('discussion')}
+                      onClick={() => {
+                        setCommunityFilter('discussion');
+                        setMapFit(v => v + 1);
+                      }}
                     >
-                      <MessageSquare size={13} /> Discuții
+                      <MessageSquare size={13} /> Discuții ({communityPostPins.filter(p => p.type === 'discussion').length})
                     </button>
                     <button
                       type="button"
                       className={communityFilter === 'saved' ? 'active' : ''}
-                      onClick={() => setCommunityFilter('saved')}
+                      onClick={() => {
+                        setCommunityFilter('saved');
+                        setMapFit(v => v + 1);
+                      }}
                     >
-                      <Bookmark size={13} /> Salvate
+                      <Bookmark size={13} /> Salvate ({savedEventIds.length + communityPostPins.filter(p => savedIds.includes(p.id)).length})
                     </button>
+                  </div>
+
+                  <div className="reports-filters-grid" style={{ paddingBottom: 0 }}>
+                    {communityFilter !== 'activity' &&
+                      communityFilter !== 'discussion' &&
+                      availableCityEventCategories.length > 0 && (
+                        <label className="compact-select-field">
+                          <span>Categorie Eveniment</span>
+                          <select
+                            value={communityEventCategory}
+                            onChange={e => {
+                              setCommunityEventCategory(e.target.value);
+                              setMapFit(v => v + 1);
+                            }}
+                          >
+                            <option value="all">Toate categoriile ({cityEventsFeed.events.length})</option>
+                            {availableCityEventCategories.map(([cat, count]) => (
+                              <option key={cat} value={cat}>
+                                {cat} ({count})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                    <label
+                      className="compact-select-field"
+                      style={
+                        communityFilter === 'activity' || communityFilter === 'discussion'
+                          ? { gridColumn: '1 / -1' }
+                          : undefined
+                      }
+                    >
+                      <span>Ordonare</span>
+                      <select
+                        value={sortBy}
+                        onChange={e => setSortBy(e.target.value as 'newest' | 'active' | 'near')}
+                      >
+                        <option value="newest">Cronologic / Cele mai noi</option>
+                        <option value="near">Aproape de mine</option>
+                        <option value="active">Cele mai active</option>
+                      </select>
+                    </label>
                   </div>
 
                   <div className="results-heading">
                     <span className="results-count">
                       {visibleCityEvents.length} evenimente oficiale · {visibleCommunityPins.length} postări comunitate
                     </span>
-                    <div className="community-filter-controls">
-                      <details className="list-options">
-                        <summary>
-                          <SlidersHorizontal size={13} /> Opțiuni
-                        </summary>
-                        <div className="list-options-body">
-                          <label>
-                            Ordine
-                            <select
-                              value={sortBy}
-                              onChange={e => setSortBy(e.target.value as 'newest' | 'active' | 'near')}
-                            >
-                              <option value="newest">Cele mai noi</option>
-                              <option value="active">Cele mai active</option>
-                              <option value="near">Aproape de mine</option>
-                            </select>
-                          </label>
-                        </div>
-                      </details>
-                    </div>
+                    <button
+                      type="button"
+                      className="stop-route-btn"
+                      onClick={() => openCreateCommunity('discussion')}
+                    >
+                      <MessageSquare size={12} /> + Discuție nouă
+                    </button>
                   </div>
 
                   <div className="pin-list" role="region" aria-label="Evenimente și Postări Comunitate">
                     {/* Official Municipal & Cultural Events Geolocated on the Map */}
                     {visibleCityEvents.map(ev => {
                       const isSelected = selectedCityEvent?.id === ev.id;
+                      const isEventSaved = savedEventIds.includes(ev.id);
+                      const linkedDiscussion = findDiscussionForCityEvent(ev);
+                      const linkedMsgCount = linkedDiscussion
+                        ? state.messages.filter(m => m.pinId === linkedDiscussion.id).length
+                        : 0;
                       const startStr = dateLabel(ev.startsAt, { day: 'numeric', month: 'short', year: 'numeric' });
                       const endStr = ev.endsAt
                         ? dateLabel(ev.endsAt, { day: 'numeric', month: 'short', year: 'numeric' })
@@ -2496,6 +2762,17 @@ export default function App({
                           key={ev.id}
                           className={`pin-card official-event-card ${isSelected ? 'is-selected' : ''}`}
                         >
+                          <div className="card-actions">
+                            <button
+                              type="button"
+                              className={`icon-btn card-bookmark ${isEventSaved ? 'bookmarked' : ''}`}
+                              aria-label={isEventSaved ? 'Elimină din salvate' : 'Salvează evenimentul'}
+                              title={isEventSaved ? 'Salvat (click pentru eliminare)' : 'Salvează evenimentul'}
+                              onClick={e => toggleSaveCityEvent(ev.id, e)}
+                            >
+                              <Bookmark size={16} />
+                            </button>
+                          </div>
                           <button
                             type="button"
                             className="card-main"
@@ -2511,7 +2788,8 @@ export default function App({
                             <h3>{ev.title}</h3>
                             <span className="place">
                               <MapPin size={12} />
-                              {ev.venue} ({ev.lat.toFixed(4)}, {ev.lon.toFixed(4)})
+                              {ev.venue} <span className="dot" />{' '}
+                              {Math.round(distance({ lon: ev.lon, lat: ev.lat }, pointA.location))} m
                             </span>
                             <div className="card-date">
                               <Calendar size={12} />
@@ -2521,18 +2799,33 @@ export default function App({
                             </div>
                           </button>
                           <div className="card-footer">
-                            <button
-                              type="button"
-                              className="stop-route-btn"
-                              onClick={() =>
-                                startRouteToDestination({
-                                  location: { lon: ev.lon, lat: ev.lat },
-                                  title: `${ev.title} (${ev.venue})`,
-                                })
-                              }
-                            >
-                              <Navigation size={12} /> Navighează (A → B)
-                            </button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="card-chat"
+                                onClick={e => startOrOpenEventDiscussion(ev, e)}
+                                title="Pornește sau deschide o discuție comunitară despre acest eveniment"
+                              >
+                                <MessageSquare size={14} />
+                                <span>
+                                  {linkedDiscussion
+                                    ? `Discuție (${linkedMsgCount})`
+                                    : 'Pornește discuție'}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="stop-route-btn"
+                                onClick={() =>
+                                  startRouteToDestination({
+                                    location: { lon: ev.lon, lat: ev.lat },
+                                    title: `${ev.title} (${ev.venue})`,
+                                  })
+                                }
+                              >
+                                <Navigation size={12} /> Rută A→B
+                              </button>
+                            </div>
                             <div className="event-external-links">
                               {ev.ticketsUrl && (
                                 <a
@@ -2552,7 +2845,7 @@ export default function App({
                                 className="action-link"
                                 style={{ width: 'auto', padding: 0 }}
                               >
-                                Detalii <ExternalLink size={12} />
+                                Oficial <ExternalLink size={12} />
                               </a>
                             </div>
                           </div>

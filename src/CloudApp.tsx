@@ -5,6 +5,7 @@ import type { AuthError, SupabaseClient, User } from '@supabase/supabase-js';
 import App from './App';
 import type { Action, Person, Pin, State } from './domain';
 import { demoTitlePrefix } from './domain';
+import { authRedirectTo, isGoogleEnabled, readAuthReturn } from './cloud-auth';
 
 const bucketName = 'vecin-photos';
 const extensions: Record<string, string> = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png' };
@@ -88,22 +89,44 @@ function cloudStore(client: SupabaseClient) {
 
 const url = import.meta.env.VITE_SUPABASE_URL?.trim();
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
-const client = url && key ? createClient(url, key) : undefined;
+const authReturn = readAuthReturn(new URL(location.href));
+const client = url && key ? createClient(url, key, { auth: { flowType: 'pkce' } }) : undefined;
 const store = client ? cloudStore(client) : undefined;
 
 export default function CloudApp() {
   const [user, setUser] = useState<User | null>();
+  const [returned, setReturned] = useState(!authReturn);
+  const [callbackError, setCallbackError] = useState('');
   useEffect(() => {
     if (!client) return;
-    const { data } = client.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null));
-    return () => data.subscription.unsubscribe();
+    const auth = client.auth;
+    const { data } = auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null));
+    let active = true;
+    if (authReturn) {
+      const destination = authReturn;
+      void (async () => {
+        let failed = destination.hasError;
+        try {
+          const result = await auth.initialize();
+          const { data } = await auth.getSession();
+          failed ||= !!result.error || !data.session;
+        } catch { failed = true; }
+        if (!active) return;
+        if (failed) {
+          setCallbackError(destination.cancelled ? 'Conectarea a fost anulată. Poți încerca din nou.' : 'Conectarea nu s-a finalizat. Încearcă din nou din același browser în care ai început.');
+        }
+        history.replaceState(history.state, '', destination.clean.href);
+        setReturned(true);
+      })();
+    }
+    return () => { active = false; data.subscription.unsubscribe(); };
   }, []);
 
   if (!client || !store) return <main className="fatal"><h1>Urban Connect nu este configurat</h1><p>Lipsesc datele de conectare la comunitate.</p></main>;
-  if (user === undefined) return <main className="fatal"><p role="status">Se încarcă Urban Connect…</p></main>;
+  if (user === undefined || !returned) return <main className="fatal"><p role="status">Se încarcă Urban Connect…</p></main>;
   const name = String(user?.user_metadata.display_name || '').trim().slice(0, 40);
   const profile = user ? person(user.id, name.length >= 2 ? name : `Vecin ${user.id.slice(0, 6)}`) : null;
-  return <App cloud={{ store, user: profile, account: <Account client={client} user={user} /> }} />;
+  return <App cloud={{ store, user: profile, reopenAccount: !!callbackError, account: <Account client={client} user={user} callbackError={callbackError} dismissCallbackError={() => setCallbackError('')} /> }} />;
 }
 
 function signInError(error: AuthError) {
@@ -129,29 +152,59 @@ function signInError(error: AuthError) {
   }
 }
 
-function Account({ client, user }: { client: SupabaseClient; user: User | null }) {
+function Account({ client, user, callbackError, dismissCallbackError }: { client: SupabaseClient; user: User | null; callbackError: string; dismissCallbackError: () => void }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [method, setMethod] = useState<'link' | 'password'>('link');
+  const [method, setMethod] = useState<'link' | 'password'>();
+  const [googleEnabled, setGoogleEnabled] = useState<boolean>();
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(callbackError);
 
-  async function send(event: FormEvent) {
-    event.preventDefault();
+  useEffect(() => {
+    dismissCallbackError();
+    if (user || !url || !key) return;
+    const controller = new AbortController();
+    let active = true;
+    const timer = window.setTimeout(() => controller.abort(), 4000);
+    void isGoogleEnabled(url, key, controller.signal)
+      .catch(() => false).then(enabled => { if (active) setGoogleEnabled(enabled); })
+      .finally(() => window.clearTimeout(timer));
+    return () => { active = false; window.clearTimeout(timer); controller.abort(); };
+  }, [user]);
+
+  async function googleSignIn() {
     if (busy) return;
     setBusy(true);
     setError('');
     try {
-      const { error } = method === 'password'
+      const { error } = await client.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: authRedirectTo(new URL(location.href)), queryParams: { prompt: 'select_account' } },
+      });
+      if (!error) return;
+    } catch { /* Show a retryable error below. */ }
+    setError('Conectarea cu Google nu a pornit. Încearcă din nou sau folosește parola.');
+    setBusy(false);
+  }
+
+  const chosen = method ?? (googleEnabled === false ? 'link' : undefined);
+
+  async function send(event: FormEvent) {
+    event.preventDefault();
+    if (busy || !chosen) return;
+    setBusy(true);
+    setError('');
+    try {
+      const { error } = chosen === 'password'
         ? await client.auth.signInWithPassword({ email: email.trim(), password })
         : await client.auth.signInWithOtp({
         email: email.trim(),
-        options: { emailRedirectTo: `${location.origin}${location.pathname}`, data: { display_name: name.trim() } },
+        options: { emailRedirectTo: authRedirectTo(new URL(location.href)), data: { display_name: name.trim() } },
       });
       if (error) setError(signInError(error));
-      else if (method === 'link') setSent(true);
+      else if (chosen === 'link') setSent(true);
       else setPassword('');
     } catch { setError('Nu am putut contacta serviciul de conectare.'); }
     finally { setBusy(false); }
@@ -171,21 +224,33 @@ function Account({ client, user }: { client: SupabaseClient; user: User | null }
   </div>;
 
   if (sent) return <div className="cloud-account">
-    <p role="status">Ți-am trimis un link de conectare la {email}. Deschide-l din e-mail.</p>
+    <p role="status">Ți-am trimis un link de conectare la {email}. Deschide-l în browserul în care ai cerut linkul.</p>
     <button className="secondary" onClick={() => setSent(false)}>Schimbă adresa</button>
   </div>;
 
-  return <form className="cloud-account" onSubmit={event => void send(event)}>
+  return <div className="cloud-account">
+    {googleEnabled === true && <button className="google-sign-in" type="button" disabled={busy} onClick={() => void googleSignIn()}>
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+        <path fill="#4285F4" d="M43.61 24.46c0-1.36-.12-2.65-.35-3.92H24v7.42h11a9.4 9.4 0 0 1-4.08 6.17v5.15h6.62c3.87-3.57 6.07-8.8 6.07-14.82Z" />
+        <path fill="#34A853" d="M24 44c5.51 0 10.14-1.82 13.54-4.72l-6.62-5.15c-1.84 1.23-4.17 1.96-6.92 1.96-5.33 0-9.85-3.6-11.47-8.44H5.7v5.3A20 20 0 0 0 24 44Z" />
+        <path fill="#FBBC05" d="M12.53 27.65a12.05 12.05 0 0 1 0-7.3v-5.3H5.7a20 20 0 0 0 0 17.9l6.83-5.3Z" />
+        <path fill="#EA4335" d="M24 11.91c3 0 5.69 1.03 7.81 3.05l5.86-5.86C34.13 5.81 29.5 4 24 4A20 20 0 0 0 5.7 15.05l6.83 5.3c1.62-4.84 6.14-8.44 11.47-8.44Z" />
+      </svg>
+      Continuă cu Google
+    </button>}
+    {googleEnabled === undefined && !chosen && <p role="status">Se verifică opțiunile de conectare…</p>}
+    {error && <p className="form-error" role="alert">{error}</p>}
+    {chosen && <form className="account-fields" onSubmit={event => void send(event)}>
     <label className="field">E-mail<input type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} /></label>
-    {method === 'password'
+    {chosen === 'password'
       ? <label className="field">Parolă<input type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} /></label>
       : <label className="field">Nume afișat <small>opțional</small><input autoComplete="nickname" maxLength={40} value={name} onChange={event => setName(event.target.value)} /></label>}
-    {error && <p className="form-error" role="alert">{error}</p>}
-    <button type="submit" className="primary full" disabled={busy}>{busy ? 'Se conectează…' : method === 'password' ? 'Conectează-te' : 'Trimite linkul de conectare'}</button>
+    <button type="submit" className="primary full" disabled={busy}>{busy ? 'Se conectează…' : chosen === 'password' ? 'Conectează-te' : 'Trimite linkul de conectare'}</button>
+    </form>}
     <button type="button" className="secondary full" disabled={busy} onClick={() => {
-      setMethod(method === 'link' ? 'password' : 'link');
+      setMethod(chosen === 'password' ? googleEnabled ? undefined : 'link' : 'password');
       setPassword('');
       setError('');
-    }}>{method === 'link' ? 'Folosește parola' : 'Primește un link pe e-mail'}</button>
-  </form>;
+    }}>{chosen === 'password' ? googleEnabled ? 'Înapoi la opțiunile de conectare' : 'Primește un link pe e-mail' : 'Folosește parola'}</button>
+  </div>;
 }

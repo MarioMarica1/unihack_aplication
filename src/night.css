@@ -29,9 +29,8 @@
   border-color: var(--night-border);
   color: var(--night-text);
 }
-[data-theme="dark"] .map-first .app-brand .brand-logo-light { display: none; }
-[data-theme="dark"] .map-first .app-brand .brand-logo-dark { display: block; }
-[data-theme="dark"] .map-first .app-brand picture { background: var(--night-surface); }
+[data-theme="dark"] .app-brand > .brand-wordmark { color: var(--night-text); }
+[data-theme="dark"] .brand-wordmark > span { color: var(--night-accent); }
 [data-theme="dark"] .map-first .detail-toolbar,
 [data-theme="dark"] .map-first .travel-mode-picker {
   background: var(--night-surface);
@@ -70,3 +69,7 @@
 [data-theme="dark"] .map-first .map-pin-label { background: var(--night-raised); border-color: var(--night-border); color: var(--night-text); }
 [data-theme="dark"] .map-first .map-pin-label :is(small, strong) { color: inherit; }
 [data-theme="dark"] .fatal { background: var(--night-bg); color: var(--night-text); }
+[data-theme="dark"] .stpt-live-status { color: var(--night-muted); }
+[data-theme="dark"] .transit-result { --transit-paper: #192b43; --transit-border: #435978; --transit-muted: #c5d4e9; }
+[data-theme="dark"] .transit-stop-marker { color: #edf5ff; }
+[data-theme="dark"] .transit-stop-marker :is(b, span) { background: #14223a; }

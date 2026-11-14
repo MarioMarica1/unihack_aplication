@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { findPlaces, normalizeSearch } from './PlacesPanel';
+import { buildPlaceCatalog } from './place-catalog';
 import type { Infrastructure } from './infrastructure';
 const data = { places: JSON.parse(readFileSync('public/data/places.geojson','utf8')) } as Infrastructure;
 describe('Căutarea locurilor reale', () => {
@@ -26,5 +27,18 @@ describe('Căutarea locurilor reale', () => {
   it('tratează coerent spațiile, literele mari și rezultate inexistente', () => {
     expect(findPlaces(data, '   MUZEUL UPT  ', 'all').length).toBeGreaterThan(0);
     expect(findPlaces(data, 'loc-inexistent-12345', 'all')).toEqual([]);
+  });
+  it('unește duplicatele apropiate și păstrează ambele moduri la stația comună', () => {
+    const make = (osmId: string, name: string, kind: string, lon: number) => ({
+      type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [lon, 45.75] },
+      properties: { osmId, name, kind },
+    });
+    const catalog = buildPlaceCatalog({ type: 'FeatureCollection', features: [
+      make('node/1', 'Țițeica', 'tram_stop', 21.23),
+      make('node/2', 'Titeica', 'bus_stop', 21.23004),
+      make('node/3', 'Țițeica', 'bus_stop', 21.231),
+    ] });
+    expect(catalog).toHaveLength(2);
+    expect(catalog[0].properties).toMatchObject({ kind: 'transit_stop', stationModes: 3 });
   });
 });

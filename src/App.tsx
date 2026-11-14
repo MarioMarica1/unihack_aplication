@@ -1,19 +1,26 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { Accessibility, ArrowDownUp, ArrowLeft, ArrowRight, Bike, Bookmark, CalendarDays, Car, Check, CheckCheck, ChevronRight, CircleHelp, Dumbbell, HandHeart, Landmark, Layers, Lightbulb, MapPinned, ExternalLink, Flag, Footprints, LocateFixed, MapPin, Maximize, MessageCircle, Moon, MoreHorizontal, Plus, Route, Search, Settings2, ShieldCheck, Sparkles, Sprout, Star, Sun, ThumbsUp, Trash2, Trees, TriangleAlert, Upload, Users, Wrench, X } from 'lucide-react';
+import { Accessibility, ArrowDownUp, ArrowLeft, ArrowRight, Bike, Bookmark, CalendarDays, Car, TrainFront, Check, CheckCheck, ChevronRight, CircleHelp, Dumbbell, HandHeart, Landmark, Layers, Lightbulb, MapPinned, ExternalLink, Flag, Footprints, LocateFixed, MapPin, Maximize, MessageCircle, Moon, MoreHorizontal, Plus, Route, Search, Settings2, ShieldCheck, Sparkles, Sprout, Star, Sun, ThumbsUp, Trash2, Trees, TriangleAlert, Upload, Users, Wrench, X } from 'lucide-react';
 import { activityState, center, dateLabel, distance, formSchema, meta, people, pointSchema } from './domain';
 import type { Action, FormInput, Pin, PinType, Point, State } from './domain';
-import { compressPhoto, dispatch, loadState, subscribe } from './storage';
+import { compressPhoto, dispatch, loadState, photoAccept, subscribe } from './storage';
 import { calculateRoute, travelModes } from './routing';
 import type { RouteResult, TravelMode } from './routing';
+import { planTransit } from './transitRouter';
+import TransitResults from './TransitResults';
 import MapLayersPanel from './MapLayersPanel';
 import PlacesPanel, { normalizeSearch, placeLink } from './PlacesPanel';
 import PinChat from './PinChat';
 import { readTheme, saveTheme } from './theme';
 import { useMapData } from './infrastructure';
 import type { Infrastructure, LayerKey, LayerVisibility, MapPlace } from './infrastructure';
+import StptLivePanel from './StptLivePanel';
+import { useStptVehicles } from './stpt-live';
+import type { LiveVehicleType } from './stpt-live';
+import { buildPlaceCatalog, filterPlaces } from './place-catalog';
 
 const MapView = lazy(() => import('./MapCanvas'));
+const hiddenLayers: LayerVisibility = { cycleways: false, tramways: false, busways: false, sidewalks: false, places: false };
 const iconFor = (type: PinType, size = 18) => type === 'report' ? <TriangleAlert size={size} /> : type === 'activity' ? <CalendarDays size={size} /> : <MessageCircle size={size} />;
 const readPin = () => { try { return decodeURIComponent(location.pathname.match(/^\/pins\/([^/]+)/)?.[1] || new URLSearchParams(location.search).get('pin') || ''); } catch { return ''; } };
 const localDateValue = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -90,9 +97,16 @@ function PinCard({ pin, person, userId, busy, selected, select, saved, save, con
   </article>;
 }
 
+function routeLocationSource(id: string) {
+  if (id.startsWith('osm:gtfs-stop/')) return 'Stație SMTT';
+  if (id.startsWith('osm:') || id.startsWith('tile:')) return 'Loc OpenStreetMap';
+  if (id.startsWith('point:')) return 'Punct ales pe hartă';
+  return 'Pin al comunității';
+}
+
 const localStore = { loadState, dispatch, subscribe };
 const guest: typeof people[number] = { id: '', name: 'Vizitator', initials: '', color: '#e9f2ee' };
-type Cloud = { store: typeof localStore; user: typeof guest | null; account: ReactNode };
+type Cloud = { store: typeof localStore; user: typeof guest | null; account: ReactNode; reopenAccount?: boolean };
 
 export default function App({ cloud }: { cloud?: Cloud }) {
   const [theme, setTheme] = useState(readTheme);
@@ -111,7 +125,7 @@ export default function App({ cloud }: { cloud?: Cloud }) {
   const [buildings, setBuildings] = useState(true);
   const [community, setCommunity] = useState<Record<PinType, boolean>>({ report: true, activity: true, discussion: true });
   const [query, setQuery] = useState(''); const [placeCategory, setPlaceCategory] = useState('all'); const [sort, setSort] = useState<'recent' | 'near'>('recent'); const [includePast, setIncludePast] = useState(false);
-  const [selectedId, setSelectedId] = useState(readPin); const [modal, setModal] = useState<'profile' | 'help' | null>(null);
+  const [selectedId, setSelectedId] = useState(readPin); const [modal, setModal] = useState<'profile' | 'help' | null>(cloud?.reopenAccount ? 'profile' : null);
   const [chatId, setChatId] = useState<string>();
   const [sharedPlace, setSharedPlace] = useState<MapPlace>();
   const chatTrigger = useRef<HTMLElement | null>(null);
@@ -119,29 +133,48 @@ export default function App({ cloud }: { cloud?: Cloud }) {
   const [formLocation, setFormLocation] = useState<Point>(); const [picking, setPicking] = useState<'form' | 'route' | null>(null);
   const [formMinimized, setFormMinimized] = useState(false); const [locationPoint, setLocationPoint] = useState<Point>(); const [gpsBusy, setGpsBusy] = useState(false); const [gpsFocus, setGpsFocus] = useState(0);
   const [toast, setToast] = useState<{ text: string; error?: boolean }>(); const [busy, setBusy] = useState(false);
-  const [visibility, setVisibility] = useState<LayerVisibility>({ cycleways: false, tramways: false, sidewalks: false, places: false }); const [pinLabels, setPinLabels] = useState(false); const [mapFit, setMapFit] = useState(0);
-  const [travelMode, setTravelMode] = useState<TravelMode>('walking'); const [extraStops, setExtraStops] = useState<MapPlace[]>([]); const [pickStop, setPickStop] = useState(false);
-  const [start, setStart] = useState<Point>(center); const [stopIds, setStopIds] = useState<string[]>([]); const [route, setRoute] = useState<RouteResult>(); const [routeBusy, setRouteBusy] = useState(false); const [routeError, setRouteError] = useState('');
+  const [visibility, setVisibility] = useState<LayerVisibility>(hiddenLayers); const [pinLabels, setPinLabels] = useState(false); const [mapFit, setMapFit] = useState(0);
+  const [liveEnabled, setLiveEnabled] = useState(false);
+  const [liveType, setLiveType] = useState<LiveVehicleType | ''>('');
+  const [liveLine, setLiveLine] = useState('');
+  const mapVisibility = view === 'layers' && !picking ? visibility : hiddenLayers;
+  const { status: liveStatus, vehicles } = useStptVehicles(view === 'layers' && liveEnabled && !picking);
+  const liveVehicles = useMemo(() => vehicles.filter(vehicle =>
+    (!liveType || vehicle.type === liveType) && (!liveLine || vehicle.line === liveLine)
+  ), [vehicles, liveType, liveLine]);
+  const [travelMode, setTravelMode] = useState<TravelMode | 'transit'>('walking'); const [routePickTarget, setRoutePickTarget] = useState<'start' | 'destination' | 'waypoint' | null>(null);
+  const [start, setStart] = useState<Point>(center); const [destination, setDestination] = useState<Pin | MapPlace | null>(null); const [waypoints, setWaypoints] = useState<(Pin | MapPlace)[]>([]); const [route, setRoute] = useState<RouteResult>(); const [routeBusy, setRouteBusy] = useState(false); const [routeError, setRouteError] = useState('');
+  const [transit, setTransit] = useState<Awaited<ReturnType<typeof planTransit>>>();
+  const [transitIndex, setTransitIndex] = useState(0);
+  const hasRoute = !!(route || transit);
   const sidebarScroll = useRef<HTMLDivElement>(null);
   const detailTrigger = useRef<HTMLElement | null>(null);
   const routeFeedback = useRef<HTMLDivElement>(null);
-  const [addDestination, setAddDestination] = useState(false);
+  const [routeOptionsFor, setRouteOptionsFor] = useState<'destination' | 'waypoint' | null>(null);
   const locationChoice = useRef(0);
   const [formGpsError, setFormGpsError] = useState('');
   useEffect(() => { sidebarScroll.current?.scrollTo({ top: 0 }); }, [view, selectedId]);
   useEffect(() => {
-    if (route || routeError) routeFeedback.current?.scrollIntoView({ block: 'nearest' });
-  }, [route, routeError]);
+    if (route || transit || routeError) routeFeedback.current?.scrollIntoView({ block: 'start' });
+  }, [route, transit, routeError]);
   const routeController = useRef<AbortController | null>(null); const [tick, setTick] = useState(0);
   const user = cloud ? cloud.user ?? guest : people.find(p => p.id === userId) || people[0];
   const profiles = state?.people ?? people;
-  const cycleways = useMapData('cycleways', visibility.cycleways);
-  const tramways = useMapData('tramways', visibility.tramways);
-  const sidewalks = useMapData('sidewalks', visibility.sidewalks);
-  const places = useMapData('places', visibility.places || view === 'places');
+  const cycleways = useMapData('cycleways', mapVisibility.cycleways);
+  const tramways = useMapData('tramways', mapVisibility.tramways);
+  const tramRefs = useMemo(() => {
+    const refs = tramways.data?.features.flatMap(({ properties }) => String(properties?.ref || properties?.routeRefs || '').split(/\s*[,;•]\s*/)) ?? [];
+    return [...new Set(refs.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ro', { numeric: true }));
+  }, [tramways.data]);
+  const busways = useMapData('busways', mapVisibility.busways);
+  const sidewalks = useMapData('sidewalks', mapVisibility.sidewalks);
+  const places = useMapData('places', mapVisibility.places || view === 'places' || mapVisibility.cycleways || mapVisibility.tramways || mapVisibility.busways);
+  const placeCatalog = useMemo(() => buildPlaceCatalog(places.data), [places.data]);
+  const filteredPlaces = useMemo(() => filterPlaces(placeCatalog, query, placeCategory), [placeCatalog, query, placeCategory]);
+  const allMapPlaces = useMemo(() => filterPlaces(placeCatalog, '', 'all'), [placeCatalog]);
   const infrastructure = useMemo<Partial<Infrastructure>>(() => ({
-    cycleways: cycleways.data, tramways: tramways.data, sidewalks: sidewalks.data, places: places.data,
-  }), [cycleways.data, tramways.data, sidewalks.data, places.data]);
+    cycleways: cycleways.data, tramways: tramways.data, busways: busways.data, sidewalks: sidewalks.data, places: places.data,
+  }), [cycleways.data, tramways.data, busways.data, sidewalks.data, places.data]);
   useEffect(() => {
     let active = true;
     const refresh = () => {
@@ -159,7 +192,15 @@ export default function App({ cloud }: { cloud?: Cloud }) {
     return () => { active = false; unsubscribe(); };
   }, [store, accountId]);
   useEffect(() => {
-    const handleHistory = () => { const id = readPin(); setChatId(undefined); setSelectedId(id); if (id) setPanelOpen(true); };
+    const handleHistory = () => {
+      const id = readPin();
+      setChatId(undefined);
+      setSelectedId(id);
+      if (id) {
+        setView('explore'); setPanelOpen(true); setActivePlace(undefined); setInspection(undefined); setSharedPlace(undefined);
+        setVisibility(hiddenLayers); setLiveEnabled(false); setLiveType(''); setLiveLine(''); setBuildings(true);
+      }
+    };
     window.addEventListener('popstate', handleHistory);
     const timer = setInterval(() => setTick(v => v + 1), 30000);
     return () => { window.removeEventListener('popstate', handleHistory); clearInterval(timer); routeController.current?.abort(); };
@@ -201,7 +242,7 @@ export default function App({ cloud }: { cloud?: Cloud }) {
     button?.focus();
   }
   function cancelPicking() {
-    setPicking(null); setPickStop(false);
+    setPicking(null); setRoutePickTarget(null);
     if (form) setFormMinimized(false);
   }
   useEffect(() => {
@@ -222,23 +263,27 @@ export default function App({ cloud }: { cloud?: Cloud }) {
   const chatPin = allPins.find(p => p.id === chatId);
   const currentPins = useMemo(() => allPins.filter(pin => includePast || pin.type !== 'activity' || (pin.status !== 'cancelled' && Date.parse(pin.endsAt!) > Date.now())), [allPins, includePast, tick]);
   const communityPins = useMemo(() => currentPins.filter(pin => community[pin.type]), [currentPins, community]);
-  const mapPins = useMemo(() => {
-    const visible = view === 'explore' ? communityPins : currentPins;
-    return selected && !visible.includes(selected) ? [...visible, selected] : visible;
-  }, [view, communityPins, currentPins, selected]);
   const savedIds = state?.saved[user.id] || [];
   const searchTerm = normalizeSearch(query);
   const pins = useMemo(() => (view === 'saved' ? allPins : communityPins).filter(p => {
     if (view === 'saved' && !savedIds.includes(p.id)) return false;
     return normalizeSearch(`${p.title} ${p.description} ${p.place} ${p.category}`).includes(searchTerm);
   }).sort((a, b) => sort === 'near' ? distance(locationPoint || center, a.location) - distance(locationPoint || center, b.location) : Date.parse(b.createdAt) - Date.parse(a.createdAt)), [allPins, view, savedIds, communityPins, searchTerm, sort, locationPoint]);
+  const mapPins = useMemo(() => {
+    if (picking || (view !== 'explore' && view !== 'saved')) return [];
+    return selected && !pins.includes(selected) ? [...pins, selected] : pins;
+  }, [view, pins, selected, picking]);
   useEffect(() => { if (state && chatId && !chatPin) setChatId(undefined); }, [state, chatId, chatPin]);
-  const stops = stopIds.map(id => allPins.find(p => p.id === id) || extraStops.find(p => p.id === id)).filter((p): p is Pin | MapPlace => !!p);
-  const stopLocations = stops.map(p => `${p.id}:${p.location.lon},${p.location.lat}`).join('|');
+  const resolveRouteLocation = (location: Pin | MapPlace) => allPins.find(p => p.id === location.id) || ('kind' in location || /^(point:|osm:|tile:)/.test(location.id) ? location : undefined);
+  const routeDestination = destination ? resolveRouteLocation(destination) : null;
+  const routeWaypoints = waypoints.map(resolveRouteLocation).filter((p): p is Pin | MapPlace => !!p);
+  const routePoints = [...routeWaypoints, ...(routeDestination ? [routeDestination] : [])];
+  const stopLocations = routePoints.map(p => `${p.id}:${p.location.lon},${p.location.lat}`).join('|');
   useEffect(() => {
-    if (stops.length !== stopIds.length) setStopIds(stops.map(p => p.id));
-    invalidateRoute();
-  }, [stopLocations]);
+    if (destination && routeDestination !== destination) setDestination(routeDestination ?? null);
+    if (routeWaypoints.length !== waypoints.length || routeWaypoints.some((p, index) => p !== waypoints[index])) setWaypoints(routeWaypoints);
+  }, [stopLocations, allPins]);
+  useEffect(() => { invalidateRoute(); }, [stopLocations]);
   async function act(action: Action, success?: string) {
     if (!user.id) { setModal('profile'); throw new Error('Conectează-te pentru a continua.'); }
     if (busy) throw new Error('Așteaptă finalizarea salvării curente.');
@@ -254,7 +299,7 @@ export default function App({ cloud }: { cloud?: Cloud }) {
     ++locationChoice.current;
     setFormGpsError('');
     setToast(undefined);
-    setFormLocation(pin?.location || related?.location || place?.location); setForm({ id, type, pin, related, place }); setFormMinimized(false); setPicking(null); setPickStop(false);
+    setFormLocation(pin?.location || related?.location || place?.location); setForm({ id, type, pin, related, place }); setFormMinimized(false); setPicking(null); setRoutePickTarget(null);
   }
   function locate(target: 'map' | 'route' | 'form' = 'map') {
     const choice = locationChoice.current;
@@ -268,7 +313,7 @@ export default function App({ cloud }: { cloud?: Cloud }) {
     setGpsBusy(true);
     navigator.geolocation.getCurrentPosition(position => {
       const point = { lon: position.coords.longitude, lat: position.coords.latitude }; setLocationPoint(point); setGpsFocus(n => n + 1); setGpsBusy(false);
-      if (target === 'route') { setStart(point); setPicking(null); setPickStop(false); invalidateRoute(); }
+      if (target === 'route') { setStart(point); setPicking(null); setRoutePickTarget(null); invalidateRoute(); }
       if (target === 'form') {
         if (locationChoice.current === choice) chooseFormLocation(point);
       } else {
@@ -281,20 +326,32 @@ export default function App({ cloud }: { cloud?: Cloud }) {
     setFormGpsError('');
     setFormLocation(point);
   }
-  function invalidateRoute() { routeController.current?.abort(); routeController.current = null; setRoute(undefined); setRouteError(''); setRouteBusy(false); }
+  function invalidateRoute() { routeController.current?.abort(); routeController.current = null; setRoute(undefined); setTransit(undefined); setTransitIndex(0); setRouteError(''); setRouteBusy(false); }
   function cancelRoute() {
     invalidateRoute();
-    setToast({ text: 'Traseu anulat. Opririle au fost păstrate.' });
+    setToast({ text: hasRoute ? 'Traseul a fost eliminat de pe hartă. Opririle au fost păstrate.' : 'Calculul a fost oprit.' });
   }
-  function addStop(id: string) {
-    if (stopIds.includes(id)) { setStopIds(current => current.filter(p => p !== id)); invalidateRoute(); return; }
-    if (stopIds.length >= 7) { setToast({ text: 'Poți adăuga maximum 7 opriri.', error: true }); return; }
-    setStopIds(current => [...current, id]); invalidateRoute(); setToast({ text: 'Locul a fost adăugat în traseu.' });
+  function addRouteLocation(location: Pin | MapPlace, target?: 'destination' | 'waypoint') {
+    const id = location.id;
+    if (target === 'destination') {
+      if (id === destination?.id) return;
+      setDestination(location); setWaypoints(current => current.filter(item => item.id !== id)); invalidateRoute(); setToast({ text: `${location.title} este destinația traseului.` }); return;
+    }
+    if (id === destination?.id) {
+      setDestination(null); invalidateRoute(); setToast({ text: 'Destinația a fost eliminată.' }); return;
+    }
+    if (waypoints.some(item => item.id === id)) {
+      setWaypoints(current => current.filter(item => item.id !== id)); invalidateRoute(); setToast({ text: 'Oprirea a fost eliminată.' }); return;
+    }
+    if (!destination) {
+      setDestination(location); invalidateRoute(); setToast({ text: `${location.title} este destinația traseului.` }); return;
+    }
+    if (waypoints.length >= 6) { setToast({ text: 'Poți adăuga maximum 6 opriri intermediare.', error: true }); return; }
+    setWaypoints(current => [...current, location]); invalidateRoute(); setToast({ text: `${location.title} a fost adăugat ca oprire.` });
   }
   function addPlace(place: MapPlace) {
-    if (stopIds.includes(place.id)) { setToast({ text: 'Acest loc este deja în traseu.' }); return; }
-    if (stopIds.length >= 7) { setToast({ text: 'Poți adăuga maximum 7 opriri.', error: true }); return; }
-    setExtraStops(current => [...current.filter(p => p.id !== place.id), place]); setStopIds(current => [...current, place.id]); invalidateRoute(); setView('routes'); setPanelOpen(true); setActivePlace(undefined); select(''); setToast({ text: `${place.title} a fost adăugat în traseu.` });
+    addRouteLocation(place, routePickTarget === 'destination' ? 'destination' : undefined);
+    setRoutePickTarget(null); setRouteOptionsFor(null); switchView('routes');
   }
   function toggleLayer(key: LayerKey) { setVisibility(current => ({ ...current, [key]: !current[key] })); }
   function chooseCommunity(type: PinType) {
@@ -304,12 +361,43 @@ export default function App({ cloud }: { cloud?: Cloud }) {
     });
     select('');
   }
-  function switchView(next: typeof view) { setView(next); setQuery(''); setPlaceCategory('all'); setActivePlace(undefined); setPanelOpen(true); select(''); }
-  function inspectPlace(place: MapPlace) { setActivePlace(place); setView('places'); setPanelOpen(true); select(''); }
+  function switchView(next: typeof view, clearPin = true) {
+    if (picking) cancelPicking();
+    if (view === 'layers' && next !== 'layers') {
+      setVisibility(hiddenLayers); setLiveEnabled(false); setLiveType(''); setLiveLine(''); setBuildings(true);
+    }
+    setView(next); setQuery(''); setPlaceCategory('all'); setActivePlace(undefined); setInspection(undefined);
+    setSharedPlace(undefined); setPanelOpen(true); if (clearPin) select('');
+  }
+  function inspectPlace(place: MapPlace) {
+    setActivePlace(place); setInspection(undefined); setPanelOpen(true); select('');
+  }
+  function pickMapPoint(point: Point) {
+    if (picking === 'form') chooseFormLocation(point);
+    else if (routePickTarget && routePickTarget !== 'start') {
+      const title = routePickTarget === 'destination' ? 'Destinație aleasă pe hartă' : `Oprire pe hartă ${waypoints.length + 1}`;
+      addRouteLocation({ id: `point:${crypto.randomUUID()}`, title, location: point }, routePickTarget);
+    } else {
+      setStart(point);
+      invalidateRoute();
+    }
+    cancelPicking();
+  }
   async function buildRoute() {
+    if (!routeDestination) return;
     const controller = new AbortController(); routeController.current?.abort(); routeController.current = controller; setRoute(undefined); setRouteBusy(true); setRouteError('');
+    setTransit(undefined); setTransitIndex(0);
     const timeout = setTimeout(() => controller.abort('timeout'), 20000);
-    try { const result = await calculateRoute(start, stops.map(p => p.location), controller.signal, travelMode); if (routeController.current === controller) setRoute(result); }
+    try {
+      if (travelMode === 'transit') {
+        const points = [{ ...start, name: 'Punctul de pornire' }, ...routePoints.map(p => ({ ...p.location, name: p.title }))];
+        const result = await planTransit(points, controller.signal);
+        if (routeController.current === controller) setTransit(result);
+      } else {
+        const result = await calculateRoute(start, routeDestination.location, routeWaypoints.map(p => p.location), controller.signal, travelMode);
+        if (routeController.current === controller) setRoute(result);
+      }
+    }
     catch (e) { if (routeController.current === controller && (!controller.signal.aborted || controller.signal.reason === 'timeout')) setRouteError(controller.signal.reason === 'timeout' ? 'Calculul a durat prea mult. Punctele sunt păstrate; reîncearcă.' : errorText(e)); }
     finally { clearTimeout(timeout); if (routeController.current === controller) setRouteBusy(false); }
   }
@@ -318,12 +406,13 @@ export default function App({ cloud }: { cloud?: Cloud }) {
   return <div className={`app-shell map-first ${panelOpen ? 'panel-open' : ''} ${selected ? 'pin-open' : ''} ${chatPin ? 'chat-open' : ''}`}>
     <header className="app-header">
       <div className="header-identity">
-        <button className="app-brand" aria-label="Urban Connect — harta principală" onClick={() => { switchView('explore'); setPanelOpen(false); }}>
-          <picture><img className="brand-logo-light" src="/urban-connect-logo-v4.png" alt="Urban Connect" /><img className="brand-logo-dark" src="/urban-connect-logo-v4-dark.png?v=2" alt="" aria-hidden="true" /></picture>
+        <button className="app-brand" aria-label="Urban Conect — harta principală" onClick={() => { switchView('explore'); setPanelOpen(false); }}>
+          <img className="brand-icon" src="/favicon.svg" width={43} height={43} alt="" />
+          <span className="brand-wordmark" aria-hidden="true">urban <span>conect</span></span>
         </button>
         <span className="header-city"><MapPin size={15} />Timișoara</span>
       </div>
-      <div className="global-search"><Search size={19} /><input aria-label="Caută destinație" placeholder="Caută destinație" value={view === 'places' ? query : ''} onChange={e => { setQuery(e.target.value); setPlaceCategory('all'); setView('places'); setActivePlace(undefined); setChatId(undefined); setSelectedId(''); history.replaceState({}, '', '/'); setPanelOpen(true); }} />{view === 'places' && query && <button aria-label="Șterge căutarea locurilor" onClick={() => { setQuery(''); setPlaceCategory('all'); setActivePlace(undefined); }}><X size={17} /></button>}</div>
+      <div className="global-search"><Search size={19} /><input aria-label="Caută destinație" placeholder="Caută destinație" value={view === 'places' ? query : ''} onChange={e => { if (view !== 'places') switchView('places'); setQuery(e.target.value); setActivePlace(undefined); setPanelOpen(true); }} />{view === 'places' && query && <button aria-label="Șterge căutarea locurilor" onClick={() => { setQuery(''); setPlaceCategory('all'); setActivePlace(undefined); }}><X size={17} /></button>}</div>
       <div className="app-header-actions"><button className="header-saved" title="Pinuri salvate" aria-label="Pinuri salvate" onClick={() => switchView('saved')}><Bookmark size={20} /></button><button className="primary header-create" aria-label="Adaugă Anunț" onClick={() => openForm('report')}><Plus size={18} /><span>Adaugă Anunț</span></button><button className="header-profile" aria-label={cloud ? user.id ? 'Contul meu' : 'Conectează-te' : 'Alege profilul demo'} onClick={() => setModal('profile')}><span className="avatar" style={{ background: user.color }}>{user.initials || <Users size={17} />}</span></button></div>
       <button className="theme-toggle" type="button" role="switch" aria-label="Mod noapte" aria-checked={theme === 'dark'} title={theme === 'dark' ? 'Comută la modul zi' : 'Comută la modul noapte'} onClick={toggleTheme}>
         {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
@@ -334,25 +423,32 @@ export default function App({ cloud }: { cloud?: Cloud }) {
         <aside className="discovery" aria-label="Panou hartă">
           <nav className="sidebar-tabs" aria-label="Instrumentele hărții">{([['explore','Comunitate'],['places','Locuri'],['routes','Traseu'],['layers','Straturi']] as const).map(([key,label]) => <button key={key} className={view === key || (view === 'saved' && key === 'explore') ? 'active' : ''} aria-current={view === key ? 'page' : undefined} onClick={() => switchView(key)}>{label}</button>)}</nav>
           {!selectedId && <div className="mobile-panel-heading"><button className="icon-btn" aria-label="Închide panoul" onClick={closeToolPanel}><X size={18} /></button></div>}
-          {selectedId && !picking ? (selected ? <Detail pin={selected} state={state} profiles={profiles} canShare={!!cloud || !!selected.demo} userId={user.id} busy={busy} close={closeDetail} act={act} edit={() => openForm(selected.type, selected)} createActivity={() => openForm('activity', undefined, selected)} addStop={() => { if (stops.length >= 7 && !stopIds.includes(selected.id)) { addStop(selected.id); return; } addStop(selected.id); switchView('routes'); }} inRoute={stopIds.includes(selected.id)} openRelated={select} notify={setToast} openChat={trigger => openChat(selected.id, trigger)} chatOpen={chatId === selected.id} /> : <div className="detail-panel"><div className="detail-toolbar"><button className="icon-btn" aria-label="Înapoi" onClick={closeDetail}><ArrowLeft size={20} /></button></div><div className="empty-state"><MapPin size={30} /><h2>Pin indisponibil</h2><p>{cloud ? 'Pinul a fost retras sau linkul nu mai este valid.' : 'Linkul poate indica un pin retras sau creat în alt browser.'}</p></div></div>) : <>
+          {selectedId && !picking ? (selected ? <Detail pin={selected} state={state} profiles={profiles} canShare={!!cloud || !!selected.demo} userId={user.id} busy={busy} close={closeDetail} act={act} edit={() => openForm(selected.type, selected)} createActivity={() => openForm('activity', undefined, selected)} addStop={() => { addRouteLocation(selected); switchView('routes'); }} inRoute={destination?.id === selected.id || waypoints.some(item => item.id === selected.id)} openRelated={select} notify={setToast} openChat={trigger => openChat(selected.id, trigger)} chatOpen={chatId === selected.id} /> : <div className="detail-panel"><div className="detail-toolbar"><button className="icon-btn" aria-label="Înapoi" onClick={closeDetail}><ArrowLeft size={20} /></button></div><div className="empty-state"><MapPin size={30} /><h2>Pin indisponibil</h2><p>{cloud ? 'Pinul a fost retras sau linkul nu mai este valid.' : 'Linkul poate indica un pin retras sau creat în alt browser.'}</p></div></div>) : <>
           <div className="sidebar-content" ref={sidebarScroll}>
-            {view === 'layers' ? <>{inspection && <div className="infrastructure-inspection"><button className="icon-btn" aria-label="Închide informația despre strat" onClick={() => setInspection(undefined)}><X size={16} /></button><strong>{inspection.title}</strong><p>{inspection.description}</p></div>}<MapLayersPanel visibility={visibility} toggle={toggleLayer} layers={{ cycleways, tramways, sidewalks, places }} labels={pinLabels} setLabels={setPinLabels} buildings={buildings} setBuildings={setBuildings} /></> : view === 'places' ? <PlacesPanel data={infrastructure} query={query} category={placeCategory} setCategory={setPlaceCategory} error={places.error} retry={places.retry} select={inspectPlace} selected={activePlace} clear={() => setActivePlace(undefined)} add={addPlace} create={place => openForm('activity', undefined, undefined, place)} share={setSharedPlace} /> : view === 'routes' ? <><div className="panel-intro"><h1>Planifică un traseu</h1><p>Alege modul de transport și 2–7 opriri. Traseul revine la start.</p></div><div className="route-planner">
-            <div className="travel-mode-picker" role="group" aria-label="Mod de transport">{(['walking', 'cycling', 'driving'] as const).map(mode => <button key={mode} className={travelMode === mode ? 'active' : ''} aria-pressed={travelMode === mode} onClick={() => { setTravelMode(mode); invalidateRoute(); }}>{mode === 'walking' ? <Footprints size={18} /> : mode === 'cycling' ? <Bike size={18} /> : <Car size={18} />}<span>{travelModes[mode].label}</span></button>)}</div>
-            <div className="route-notice"><Route size={18} /><p><strong>Traseu {travelMode === 'walking' ? 'pietonal' : travelMode === 'cycling' ? 'pentru bicicletă' : 'auto'}</strong><br />Calcul pe rețeaua {travelMode === 'walking' ? 'pietonală' : travelMode === 'cycling' ? 'accesibilă bicicletelor' : 'rutieră auto'}, cu profil OSRM dedicat.</p></div>
+            {view === 'layers' && !activePlace ? <>{inspection && <div className="infrastructure-inspection"><button className="icon-btn" aria-label="Închide informația despre strat" onClick={() => setInspection(undefined)}><X size={16} /></button><strong>{inspection.title}</strong><p>{inspection.description}</p></div>}<MapLayersPanel tramRefs={tramRefs} live={<StptLivePanel enabled={liveEnabled} toggle={() => setLiveEnabled(enabled => !enabled)} kind={liveType} setKind={type => { setLiveType(type); setLiveLine(''); }} line={liveLine} setLine={setLiveLine} status={liveStatus} count={liveVehicles.length} />} visibility={visibility} toggle={toggleLayer} layers={{ cycleways, tramways, busways, sidewalks, places }} buildings={buildings} setBuildings={setBuildings} /></> : (view === 'places' || (view === 'layers' && activePlace)) ? <PlacesPanel places={places.data ? (view === 'places' ? filteredPlaces : allMapPlaces) : undefined} detailsInLayers={view === 'layers'} query={query} category={placeCategory} setCategory={setPlaceCategory} error={places.error} retry={places.retry} select={inspectPlace} selected={activePlace} clear={() => setActivePlace(undefined)} add={addPlace} create={place => openForm('activity', undefined, undefined, place)} share={setSharedPlace} /> : view === 'routes' ? <><div className="panel-intro"><h1>Planifică un traseu</h1><p>Alege modul de transport, o destinație și opriri opționale.</p></div><div className="route-planner">
+            <div className="travel-mode-picker" role="group" aria-label="Mod de transport">{(['walking', 'cycling', 'driving', 'transit'] as const).map(mode => <button key={mode} className={travelMode === mode ? 'active' : ''} aria-pressed={travelMode === mode} onClick={() => { if (mode !== travelMode) { setTravelMode(mode); invalidateRoute(); } }}>{mode === 'walking' ? <Footprints size={18} /> : mode === 'cycling' ? <Bike size={18} /> : mode === 'driving' ? <Car size={18} /> : <TrainFront size={18} />}<span>{mode === 'transit' ? 'Transport public' : travelModes[mode].label}</span></button>)}</div>
+            <div className="route-notice"><Route size={18} />{travelMode === 'transit' ? <p><strong>Traseu cu transportul public</strong><br />Calcul pe rețeaua STPT, cu deplasare pe jos între stații când este necesar.</p> : <p><strong>Traseu {travelMode === 'walking' ? 'pietonal' : travelMode === 'cycling' ? 'pentru bicicletă' : 'auto'}</strong><br />Calcul pe rețeaua {travelMode === 'walking' ? 'pietonală' : travelMode === 'cycling' ? 'accesibilă bicicletelor' : 'rutieră auto'}, cu profil OSRM dedicat.</p>}</div>
             <label className="field-label">PUNCT DE PORNIRE</label><div className="route-start"><span className="start-dot" /><div><strong>{start.lon === center.lon && start.lat === center.lat ? 'Centrul Timișoarei' : 'Punctul ales'}</strong><small>{start.lat.toFixed(5)}, {start.lon.toFixed(5)}</small></div></div>
-            <div className="two-actions"><button className="secondary" onClick={() => locate('route')} disabled={gpsBusy}><LocateFixed size={15} />{gpsBusy ? 'Se caută…' : 'Poziția mea'}</button><button className="secondary" onClick={() => { setPickStop(false); setPicking('route'); select(''); }}><MapPin size={15} />Alege pe hartă</button></div>
-            <div className="section-label"><span>OPRIRI</span><span>{stops.length}/7</span></div>
-            {stops.length === 0 && <div className="empty-route"><MapPin size={24} /><p>Adaugă cel puțin două locuri.<br />Alege din listă sau deschide un pin pe hartă.</p></div>}
-            {(route ? route.order.filter(index => index > 0).map(index => stops[index - 1]).filter(Boolean) : stops).map((p, i) => <div className="route-stop" key={p.id}><span>{i + 1}</span><div><strong>{p.title}</strong><small>{p.id.startsWith('osm:') || p.id.startsWith('tile:') ? 'Loc OpenStreetMap' : p.id.startsWith('point:') ? 'Punct ales pe hartă' : 'Pin al comunității'}</small></div><button className="icon-btn" aria-label={`Elimină ${p.title}`} onClick={() => addStop(p.id)}><X size={15} /></button></div>)}
-            <button className="secondary full" disabled={stops.length >= 7} aria-expanded={addDestination} onClick={() => setAddDestination(value => !value)}><Plus size={16} />Adaugă oprire</button>
-            {addDestination && <div className="destination-options"><select className="stop-select" aria-label="Adaugă oprire" value="" onChange={e => { if (e.target.value) { addStop(e.target.value); setAddDestination(false); } }} disabled={stops.length >= 7}><option value="">+ Adaugă un loc din comunitate</option>{allPins.filter(p => !stopIds.includes(p.id)).map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select>
-            <button className="secondary full manual-stop" disabled={stops.length >= 7} onClick={() => { setAddDestination(false); setPickStop(true); setPicking('route'); select(''); }}><MapPin size={15} />Alege pe hartă</button><button className="secondary full" onClick={() => { setAddDestination(false); switchView('places'); document.querySelector<HTMLInputElement>('.global-search input')?.focus(); }}>Caută un loc</button></div>}
+            <div className="two-actions"><button className="secondary" onClick={() => locate('route')} disabled={gpsBusy}><LocateFixed size={15} />{gpsBusy ? 'Se caută…' : 'Poziția mea'}</button><button className="secondary" onClick={() => { setRoutePickTarget('start'); setPicking('route'); select(''); }}><MapPin size={15} />Alege pe hartă</button></div>
+            <div className="section-label"><span>DESTINAȚIE</span></div>
+            {routeDestination ? <div className="route-stop route-destination"><span>D</span><div><strong>{routeDestination.title}</strong><small>{routeLocationSource(routeDestination.id)}</small></div><button className="icon-btn" aria-label="Elimină destinația" onClick={() => { setDestination(null); invalidateRoute(); }}><X size={15} /></button></div> : <div className="empty-route"><MapPin size={24} /><p>Adaugă o destinație. Alege din listă sau deschide un pin pe hartă.</p></div>}
+            <button className="secondary full" aria-expanded={routeOptionsFor === 'destination'} onClick={() => setRouteOptionsFor(value => value === 'destination' ? null : 'destination')}><Plus size={16} />{routeDestination ? 'Schimbă destinația' : 'Alege destinația'}</button>
+            {routeDestination && <><div className="section-label"><span>OPRIRI INTERMEDIARE</span><span>{routeWaypoints.length}/6</span></div>
+              {routeWaypoints.map((p, i) => <div className="route-stop" key={p.id}><span>{i + 1}</span><div><strong>{p.title}</strong><small>{routeLocationSource(p.id)}</small></div><button className="icon-btn" aria-label={`Elimină oprirea ${p.title}`} onClick={() => setWaypoints(current => current.filter(item => item.id !== p.id))}><X size={15} /></button></div>)}
+              <button className="secondary full" disabled={routeWaypoints.length >= 6} aria-expanded={routeOptionsFor === 'waypoint'} onClick={() => setRouteOptionsFor(value => value === 'waypoint' ? null : 'waypoint')}><Plus size={16} />Adaugă oprire</button>
+            </>}
+            {routeOptionsFor && <div className="destination-options"><select className="stop-select" aria-label={routeOptionsFor === 'destination' ? 'Alege destinația' : 'Adaugă oprire'} value="" onChange={e => { const pin = allPins.find(p => p.id === e.target.value); if (pin) addRouteLocation(pin, routeOptionsFor); setRouteOptionsFor(null); }}><option value="">{routeOptionsFor === 'destination' ? 'Alege din comunitate' : 'Alege un pin din comunitate'}</option>{allPins.filter(p => p.id !== destination?.id && (routeOptionsFor === 'destination' || !waypoints.some(item => item.id === p.id))).map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select>
+            <button className="secondary full manual-stop" disabled={routeOptionsFor === 'waypoint' && routeWaypoints.length >= 6} onClick={() => { setRoutePickTarget(routeOptionsFor); setRouteOptionsFor(null); setPicking('route'); select(''); }}><MapPin size={15} />Alege pe hartă</button><button className="secondary full" onClick={() => { if (routeOptionsFor === 'destination') setRoutePickTarget('destination'); setRouteOptionsFor(null); switchView('places'); document.querySelector<HTMLInputElement>('.global-search input')?.focus(); }}>Caută un loc</button></div>}
             <div className="route-actions">
-              <button className="primary full" disabled={stops.length < 2 || routeBusy} onClick={() => void buildRoute()}>{routeBusy ? <span className="spinner" /> : <Route size={18} />}{routeBusy ? 'Calculăm traseul…' : 'Generează traseul'}</button>
-              {(routeBusy || route || routeError) && <button className="secondary" onClick={cancelRoute}>Anulează traseul</button>}
+              <button className="primary full" disabled={!routeDestination || routeBusy} onClick={() => void buildRoute()}>{routeBusy ? <span className="spinner" /> : <Route size={18} />}{routeBusy ? 'Calculăm traseul…' : 'Generează traseul'}</button>
+              {routeBusy && <button className="secondary" onClick={cancelRoute}>Oprește calculul</button>}
             </div>
             <div ref={routeFeedback}>{routeError && <p className="form-error" role="alert">{routeError}</p>}
-            {route && <div className="route-result"><span className="eyebrow">TRASEU CALCULAT · {travelModes[route.mode].label.toLocaleUpperCase('ro')}</span><div><strong>{(route.distance / 1000).toFixed(1)} <small>km</small></strong><strong>{Math.ceil(route.duration / 60)} <small>min</small></strong></div><p>Ordinea vizitelor: start → {route.order.filter(i => i > 0).map(i => stops[i - 1]?.title).join(' → ')} → start.</p>{route.warnings.map(w => <p key={w} className="warning">{w}</p>)}<small>Durată estimată, fără trafic live. Nu garantează evitarea sesizărilor.</small></div>}</div>
+            {hasRoute && <div className="route-result-actions">
+              <button className="secondary route-show-map" onClick={closeToolPanel}><MapPinned size={16} />Vezi pe hartă</button>
+              <button className="secondary" onClick={cancelRoute}><Trash2 size={16} />Elimină traseul</button>
+            </div>}
+            {transit && <TransitResults {...transit} selected={transitIndex} select={setTransitIndex} />}{route && <div className="route-result"><span className="eyebrow">TRASEU CALCULAT · {travelModes[route.mode].label.toLocaleUpperCase('ro')}</span><div><strong>{(route.distance / 1000).toFixed(1)} <small>km</small></strong><strong>{Math.ceil(route.duration / 60)} <small>min</small></strong></div><p>Ordinea vizitelor: start → {route.order.filter(i => i > 0).map(i => routePoints[i - 1]?.title).join(' → ')}.</p>{route.warnings.map(w => <p key={w} className="warning">{w}</p>)}<small>Durată estimată, fără trafic live. Nu garantează evitarea sesizărilor.</small></div>}</div>
             <p className="routing-attribution">Rutare © <a href="https://routing.openstreetmap.de/about.html" target="_blank" rel="noreferrer">FOSSGIS / OSRM</a> · © OpenStreetMap<br /><a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noreferrer">Semnalează o eroare în hartă</a>. Serviciu public fără garanție de disponibilitate. Punctele traseului sunt trimise furnizorului la calcul.</p>
           </div></> : <><div className="panel-intro community-intro"><div className="community-title-row"><h1>{view === 'saved' ? 'Pinuri salvate' : 'În comunitate'}</h1>{view !== 'saved' && <button className="secondary community-create" onClick={() => openForm('report')}><Plus size={16} />Adaugă Anunț</button>}</div><button className="community-saved" onClick={() => switchView(view === 'saved' ? 'explore' : 'saved')}><Bookmark size={14} />{view === 'saved' ? 'Toată comunitatea' : 'Vezi pinurile salvate'}</button></div>
             <div className="search-box"><Search size={17} /><input aria-label="Caută în comunitate" placeholder="Caută un loc, o idee, o activitate…" value={query} onChange={e => setQuery(e.target.value)} />{query && <button className="icon-btn" aria-label="Șterge căutarea" onClick={() => setQuery('')}><X size={15} /></button>}</div>
@@ -362,7 +458,7 @@ export default function App({ cloud }: { cloud?: Cloud }) {
             <div className="results-heading"><span className="results-count">{pins.length} {view === 'saved' ? 'salvate' : 'Anunțuri'}</span>
               <details className="list-options">
                 <summary><ArrowDownUp size={14} />Filtre</summary>
-                <div className="list-options-body"><label>Ordine<select value={sort} onChange={event => setSort(event.target.value === 'near' ? 'near' : 'recent')}><option value="recent">Cele mai recente</option><option value="near">{locationPoint ? 'Aproape de mine' : 'Aproape de centru'}</option></select></label>
+                <div className="list-options-body"><label className="checkbox-line"><input type="checkbox" checked={pinLabels} onChange={e => setPinLabels(e.target.checked)} />Arată numele pe hartă</label><label>Ordine<select value={sort} onChange={event => setSort(event.target.value === 'near' ? 'near' : 'recent')}><option value="recent">Cele mai recente</option><option value="near">{locationPoint ? 'Aproape de mine' : 'Aproape de centru'}</option></select></label>
                 {view === 'explore' && community.activity && <label className="checkbox-line"><input type="checkbox" checked={includePast} onChange={e => setIncludePast(e.target.checked)} />Include activități încheiate sau anulate</label>}</div>
               </details>
             </div>
@@ -381,18 +477,28 @@ export default function App({ cloud }: { cloud?: Cloud }) {
         </aside>
         {chatPin && <PinChat key={chatPin.id} pin={chatPin} messages={state.messages} profiles={profiles} userId={user.id} busy={busy} cloud={!!cloud} close={closeChat} signIn={() => setModal('profile')} act={act} />}
         <section className={`map-area ${picking ? 'is-picking' : ''}`} aria-label="Harta comunității">
-          <Suspense fallback={<div className="map-surface"><div className="map-loading" role="status">Se încarcă harta…</div></div>}><MapView theme={theme} pins={mapPins} selected={selected} onSelect={select} picking={!!picking} onPick={point => { if (picking === 'form') chooseFormLocation(point); else if (pickStop) { addPlace({ id: `point:${crypto.randomUUID()}`, title: `Oprire pe hartă ${stops.length + 1}`, location: point }); setPickStop(false); } else { setStart(point); invalidateRoute(); } setPicking(null); if (form) setFormMinimized(false); }} picked={picking === 'form' || (form && formMinimized) ? formLocation : view === 'routes' ? start : undefined} userLocation={locationPoint} route={view === 'routes' ? route : undefined} focus={gpsFocus} infrastructure={infrastructure} visibility={visibility} labels={pinLabels} mapFit={mapFit} buildings={buildings} focusedPlace={activePlace} onInspectPlace={inspectPlace} onInspectLine={info => { setInspection(info); setView('layers'); setPanelOpen(true); select(''); }} /></Suspense>
-          <div className="map-utility-controls"><button aria-label="Localizează-mă" onClick={() => locate()} disabled={gpsBusy}>{gpsBusy ? <span className="spinner" /> : <LocateFixed size={20} />}</button><button aria-label="Încadrează pinurile afișate" onClick={() => { select(''); setMapFit(value => value + 1); }}><Maximize size={19} /></button></div>
-          {picking && <div className="picking-notice"><MapPin size={20} /><div><strong>Atinge un punct pe hartă</strong><span>{picking === 'form' ? 'Aici va apărea pinul tău.' : pickStop ? 'Adaugă o destinație în traseu.' : 'Alege începutul traseului.'}</span></div><button className="secondary" onClick={cancelPicking}>Renunță</button></div>}
+          <Suspense fallback={<div className="map-surface"><div className="map-loading" role="status">Se încarcă harta…</div></div>}>
+            <MapView theme={theme} tab={view} browsePlaces={view === 'places' ? filteredPlaces : allMapPlaces} placeCatalog={placeCatalog}
+              liveVehicles={view === 'layers' && !picking ? liveVehicles : []}
+              routePoints={view === 'routes' && !picking ? [{ location: start, title: 'Punct de pornire' }, ...routeWaypoints, ...(routeDestination ? [{ ...routeDestination, destination: true }] : [])] : []}
+              pins={mapPins} selected={selected} onSelect={select} picking={!!picking} onPick={pickMapPoint}
+              picked={picking === 'form' || (form && formMinimized) ? formLocation : undefined} userLocation={locationPoint}
+              route={picking ? undefined : route} transit={picking ? undefined : transit?.options[transitIndex]} mobilePanelOpen={panelOpen}
+              focus={gpsFocus} infrastructure={infrastructure} visibility={mapVisibility} labels={pinLabels} mapFit={mapFit} buildings={buildings}
+              focusedPlace={activePlace} onInspectPlace={inspectPlace} onInspectLine={info => { setInspection(info); setActivePlace(undefined); setPanelOpen(true); }} />
+          </Suspense>
+          {hasRoute && !picking && <button className={`secondary map-remove-route ${view === 'routes' && !selectedId ? 'route-panel-action' : ''}`} onClick={cancelRoute}><Trash2 size={16} />Elimină traseul</button>}
+          <div className="map-utility-controls"><button aria-label="Localizează-mă" onClick={() => locate()} disabled={gpsBusy}>{gpsBusy ? <span className="spinner" /> : <LocateFixed size={20} />}</button>{(view === 'explore' || view === 'saved') && <button aria-label="Încadrează pinurile afișate" onClick={() => { select(''); setMapFit(value => value + 1); }}><Maximize size={19} /></button>}</div>
+          {picking && <div className="picking-notice"><MapPin size={20} /><div><strong>Atinge un punct pe hartă</strong><span>{picking === 'form' ? 'Aici va apărea pinul tău.' : routePickTarget === 'destination' ? 'Setează destinația traseului.' : routePickTarget === 'waypoint' ? 'Adaugă o oprire intermediară.' : 'Alege începutul traseului.'}</span></div><button className="secondary" onClick={cancelPicking}>Renunță</button></div>}
         </section>
       </main>
     </div>
     <nav className="mobile-map-nav" aria-label="Navigare mobilă">{([['explore','Comunitate'],['places','Locuri'],['routes','Traseu'],['layers','Straturi']] as const).map(([key,label]) => <button key={key} className={(view === key || (key === 'explore' && view === 'saved')) && panelOpen ? 'active' : ''} aria-expanded={(view === key || (key === 'explore' && view === 'saved')) && panelOpen} onClick={() => { if (picking) cancelPicking(); if (view === key && panelOpen && !selectedId) { closeToolPanel(); select(''); } else switchView(key); }}>{key === 'layers' ? <Layers size={20} /> : key === 'places' ? <MapPinned size={20} /> : key === 'explore' ? <Users size={20} /> : <Route size={20} />}<span>{label}</span></button>)}</nav>
-    {form && <div style={{ display: formMinimized ? 'none' : undefined }}><CreateForm placePreset={form.place?.title} active={!formMinimized} type={form.type} pin={form.pin} related={form.related} point={formLocation} setPoint={chooseFormLocation} gpsError={formGpsError} cloud={!!cloud} pick={() => { setFormMinimized(true); setPicking('form'); }} locate={() => locate('form')} gpsBusy={gpsBusy} close={() => { ++locationChoice.current; setForm(null); setPicking(null); setFormMinimized(false); }} submit={async input => { const id = form.id; await act(form.pin ? { type: 'edit', pinId: id, input, userId: user.id } : { type: 'create', id, input, userId: user.id }, form.pin ? 'Modificările au fost salvate.' : 'Pinul tău este acum în comunitate.'); ++locationChoice.current; setForm(null); setView('explore'); setCommunity(current => ({ ...current, [input.type]: true })); setQuery(''); select(id); }} /></div>}
+    {form && <div style={{ display: formMinimized ? 'none' : undefined }}><CreateForm placePreset={form.place?.title} active={!formMinimized} type={form.type} pin={form.pin} related={form.related} point={formLocation} setPoint={chooseFormLocation} gpsError={formGpsError} cloud={!!cloud} pick={() => { setFormMinimized(true); setPicking('form'); }} locate={() => locate('form')} gpsBusy={gpsBusy} close={() => { ++locationChoice.current; setForm(null); setPicking(null); setFormMinimized(false); }} submit={async input => { const id = form.id; await act(form.pin ? { type: 'edit', pinId: id, input, userId: user.id } : { type: 'create', id, input, userId: user.id }, form.pin ? 'Modificările au fost salvate.' : 'Pinul tău este acum în comunitate.'); ++locationChoice.current; setForm(null); switchView('explore', false); setCommunity(current => ({ ...current, [input.type]: true })); setQuery(''); select(id); }} /></div>}
     {sharedPlace && <SharePlace place={sharedPlace} close={() => setSharedPlace(undefined)} />}
     {modal === 'profile' && cloud && <Modal title={user.id ? 'Contul meu' : 'Conectează-te'} close={() => setModal(null)}>{cloud.account}</Modal>}
     {modal === 'profile' && !cloud && <Modal title="Profiluri demo" close={() => setModal(null)}><p className="modal-intro">Acestea sunt identități simulate, pentru demo. Schimbă profilul ca să testezi înscrierea, confirmările și conversațiile. Nu sunt conturi Supabase.</p><div className="profile-options">{people.map(p => <button key={p.id} className={user.id === p.id ? 'chosen' : ''} onClick={() => { setUserId(p.id); sessionStorage.setItem('vecin-user', p.id); setModal(null); setToast({ text: `Testezi acum ca ${p.name}.` }); }}><span className="avatar" style={{ background: p.color }}>{p.initials}</span><span><strong>{p.name}</strong><small>Profil demonstrativ</small></span>{user.id === p.id ? <Check size={20} /> : <ChevronRight size={20} />}</button>)}</div><div className="info-box"><ShieldCheck size={19} /><p>Datele sunt comune filelor de browser de pe aceeași adresă. Alte dispozitive nu le văd. Autentificarea reală și sincronizarea cloud sunt următoarea etapă.</p></div></Modal>}
-    {modal === 'help' && <Modal title="Bun venit în Urban Connect" close={() => setModal(null)}><p className="modal-intro">O hartă pentru lucrurile pe care le putem face împreună. Acesta este primul demo funcțional pentru UniHack / Connected Communities.</p><div className="help-steps"><div><TriangleAlert /><span><strong>Semnalează ceva de îmbunătățit</strong><p>Alege locul, adaugă o fotografie și publică. Un alt profil poate confirma sau comenta.</p></span></div><div><CalendarDays /><span><strong>Adună oamenii în jurul unei idei</strong><p>Creează o activitate, testează înscrierea și discută cu participanții.</p></span></div><div><Route /><span><strong>Leagă locurile într-un traseu</strong><p>Alege 2–7 opriri și calculează un traseu pietonal, pentru bicicletă sau auto. Necesită internet.</p></span></div></div><div className="info-box"><ShieldCheck /><p>{cloud ? 'Pinurile, fotografiile și conversațiile publicate sunt vizibile comunității.' : 'În demo, pinurile, fotografiile, conversațiile și înscrierile sunt salvate în acest browser.'}</p></div><button className="primary full" onClick={() => setModal(null)}>Hai să explorăm <ArrowRight size={17} /></button></Modal>}
+    {modal === 'help' && <Modal title="Bun venit în Urban Connect" close={() => setModal(null)}><p className="modal-intro">O hartă pentru lucrurile pe care le putem face împreună. Acesta este primul demo funcțional pentru UniHack / Connected Communities.</p><div className="help-steps"><div><TriangleAlert /><span><strong>Semnalează ceva de îmbunătățit</strong><p>Alege locul, adaugă o fotografie și publică. Un alt profil poate confirma sau comenta.</p></span></div><div><CalendarDays /><span><strong>Adună oamenii în jurul unei idei</strong><p>Creează o activitate, testează înscrierea și discută cu participanții.</p></span></div><div><Route /><span><strong>Leagă locurile într-un traseu</strong><p>Alege o destinație și opriri opționale, apoi calculează traseul pietonal, pentru bicicletă sau auto. Necesită internet.</p></span></div></div><div className="info-box"><ShieldCheck /><p>{cloud ? 'Pinurile, fotografiile și conversațiile publicate sunt vizibile comunității.' : 'În demo, pinurile, fotografiile, conversațiile și înscrierile sunt salvate în acest browser.'}</p></div><button className="primary full" onClick={() => setModal(null)}>Hai să explorăm <ArrowRight size={17} /></button></Modal>}
     {fatal && state && !toast && <div className="toast error" role="status">Datele nu s-au putut actualiza. Reîncercăm automat.</div>}
     {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <TriangleAlert size={18} /> : <Check size={18} />}<span>{toast.text}</span><button aria-label="Închide notificarea" onClick={() => setToast(undefined)}><X size={16} /></button></div>}
   </div>;
@@ -502,7 +608,26 @@ function CreateForm({ cloud, gpsError, type: initialType, pin, related, placePre
       <label className="field full-width">Descriere<textarea required minLength={10} maxLength={2000} rows={3} placeholder="Câteva detalii îi ajută pe vecini să înțeleagă." value={description} onChange={e => setDescription(e.target.value)} /></label>
       <label className="field"><span className="pin-category-label" id="pin-category-label"><CategoryIcon size={14} aria-hidden="true" />Categorie</span><select aria-labelledby="pin-category-label" value={category} onChange={e => setCategory(e.target.value)}>{meta[type].categories.map(c => <option key={c}>{c}</option>)}</select></label><label className="field">Numele locului<input maxLength={100} placeholder="Ex. intrarea în Parcul Central" value={place} onChange={e => setPlace(e.target.value)} /></label>
       {type === 'activity' && <><label className="field">Începe<input required type="datetime-local" value={startsAt} onChange={e => setStartsAt(e.target.value)} /></label><label className="field">Se încheie<input required type="datetime-local" value={endsAt} onChange={e => setEndsAt(e.target.value)} /></label><label className="field full-width">Număr total de locuri <small>opțional · organizatorul ocupă un loc</small><input type="number" min={1} max={500} placeholder="Fără limită" value={capacity} onChange={e => setCapacity(e.target.value)} /></label></>}
-      {type !== 'discussion' && <div className="field full-width">{type === 'report' ? 'Fotografie' : 'Imagine · opțional'}<input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={async e => { const file = e.target.files?.[0]; if (!file) return; setImageBusy(true); setError(''); try { setImage(await compressPhoto(file)); setDirty(true); } catch (e) { setError(errorText(e)); } finally { setImageBusy(false); if (fileRef.current) fileRef.current.value = ''; } }} />{image ? <div className="upload-preview"><img src={image} alt="Previzualizare fotografie" /><button type="button" className="secondary" onClick={() => { setImage(''); setDirty(true); }}>Elimină fotografia</button></div> : <button type="button" className="upload-area" disabled={imageBusy} onClick={() => fileRef.current?.click()}>{imageBusy ? <span className="spinner" /> : <Upload size={24} />}<strong>{imageBusy ? 'Pregătim fotografia…' : 'Alege o fotografie'}</strong><span>JPG, PNG sau WebP · max. 15 MB · comprimare automată</span></button>}</div>}
+      {type !== 'discussion' && <div className="field full-width">
+        {type === 'report' ? 'Fotografie' : 'Imagine · opțional'}
+        <input ref={fileRef} hidden type="file" accept={photoAccept} onChange={async e => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          setImageBusy(true);
+          setError('');
+          try { setImage(await compressPhoto(file)); setDirty(true); }
+          catch (e) { setError(errorText(e)); }
+          finally { setImageBusy(false); if (fileRef.current) fileRef.current.value = ''; }
+        }} />
+        {image ? <div className="upload-preview">
+          <img src={image} alt="Previzualizare fotografie" />
+          <button type="button" className="secondary" onClick={() => { setImage(''); setDirty(true); }}>Elimină fotografia</button>
+        </div> : <button type="button" className="upload-area" disabled={imageBusy} onClick={() => fileRef.current?.click()}>
+          {imageBusy ? <span className="spinner" /> : <Upload size={24} />}
+          <strong>{imageBusy ? 'Pregătim fotografia…' : 'Alege o fotografie'}</strong>
+          <span>JPG, PNG, WebP sau HEIC compatibil · max. 15 MB</span>
+        </button>}
+      </div>}
 
     </div>
     <div className="publish-note"><ShieldCheck size={18} /><p>{type === 'activity' ? 'Orele sunt introduse în fusul orar al dispozitivului și afișate în ora României. ' : ''}{cloud ? 'Locația, conținutul și fotografia pinului vor fi publice.' : 'Locația și conținutul pinului sunt salvate în acest browser.'}</p></div>

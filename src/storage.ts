@@ -40,20 +40,52 @@ export async function dispatch(action: Action): Promise<State> {
 }
 export function subscribe(fn: () => void): () => void { listeners.add(fn); return () => { listeners.delete(fn); }; }
 
+const photoTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+const photoExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'];
+export const photoAccept = [...photoTypes, ...photoExtensions].join(',');
+
 export async function compressPhoto(file: File): Promise<string> {
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Alege o fotografie JPG, PNG sau WebP.');
+  const extension = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+  if (!photoTypes.includes(file.type) && !photoExtensions.includes(extension)) {
+    throw new Error('Alege o fotografie JPG, PNG, WebP sau HEIC.');
+  }
   if (file.size > 15 * 1024 * 1024) throw new Error('Fotografia poate avea maximum 15 MB înainte de comprimare.');
   const url = URL.createObjectURL(file);
+  const canvas = document.createElement('canvas');
   try {
-    const img = new Image(); img.src = url; await img.decode();
-    const scale = Math.min(1, 1400 / Math.max(img.width, img.height));
-    const canvas = document.createElement('canvas'); canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
-    const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Procesarea imaginilor nu este disponibilă.');
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    let quality = 0.8; let data = canvas.toDataURL('image/webp', quality);
-    while (data.length * 0.75 > 500_000 && quality > 0.25) { quality -= 0.1; data = canvas.toDataURL('image/webp', quality); }
-    if (data.length * 0.75 > 1_000_000) throw new Error('Fotografia nu a putut fi comprimată suficient. Alege una mai mică.');
-    return data;
-  } catch (error) { if (error instanceof Error && /fotografi|imagin/i.test(error.message)) throw error; throw new Error('Imaginea nu poate fi citită. Încearcă un fișier JPG sau PNG valid.'); }
-  finally { URL.revokeObjectURL(url); }
+    const img = new Image();
+    img.src = url;
+    await img.decode().catch(() => { throw new Error('Browserul nu poate deschide această fotografie. Încearcă un fișier JPG sau PNG.'); });
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('Procesarea imaginilor nu este disponibilă.');
+
+    const originalSize = Math.max(img.naturalWidth, img.naturalHeight);
+    let photo: Blob | null = null;
+    // Supabase accepts JPEG up to 1 MB. Resize further if quality alone isn't enough.
+    for (const maxSize of [1400, 960, 640]) {
+      const scale = Math.min(1, maxSize / originalSize);
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      for (const quality of [0.82, 0.64]) {
+        photo = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+        if (photo?.type === 'image/jpeg' && photo.size > 0 && photo.size <= 500_000) break;
+      }
+      if (photo?.type === 'image/jpeg' && photo.size > 0 && photo.size <= 500_000) break;
+    }
+    if (photo?.type !== 'image/jpeg' || !photo.size || photo.size > 1_000_000) {
+      throw new Error('Fotografia nu a putut fi comprimată. Încearcă să alegi din nou fișierul.');
+    }
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Fotografia nu a putut fi pregătită. Încearcă din nou.'));
+      reader.readAsDataURL(photo);
+    });
+  } finally {
+    canvas.width = canvas.height = 1;
+    URL.revokeObjectURL(url);
+  }
 }

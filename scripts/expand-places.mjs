@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 const directory = new URL('../public/data/', import.meta.url);
-const bbox = '45.72,21.18,45.79,21.28';
-const query = `[out:json][timeout:60];(nwr[~"^(amenity|shop|tourism|office|building)$"~"."][name](${bbox});nwr[leisure~"^(park|sports_centre|pitch)$"][name](${bbox}););out tags center;`;
+const bbox = '45.68,21.14,45.82,21.32';
+const query = `[out:json][timeout:90];(nwr[~"^(amenity|shop|tourism|office|building|healthcare|craft|historic)$"~"."][name](${bbox});nwr[leisure~"^(park|sports_centre|pitch|stadium)$"][name](${bbox}););out tags center;`;
 const response = await fetch(`https://overpass-api.de/api/interpreter?${new URLSearchParams({ data: query })}`, { signal: AbortSignal.timeout(75000), headers: { 'User-Agent': 'Vecin-UniHack/0.3 (bounded static place export)' } });
 if (!response.ok) throw new Error(`OSM export failed: ${response.status}`);
 const result = await response.json(); if (!Array.isArray(result.elements) || result.remark) throw new Error(result.remark || 'Invalid OSM response');
@@ -18,6 +18,10 @@ function classify(tags) {
   if (tags.tourism || /^(theatre|cinema|arts_centre|community_centre)$/.test(tags.amenity || '')) return 'culture';
   if (/^(bus_station|ferry_terminal|bicycle_rental|car_rental|fuel|charging_station)$/.test(tags.amenity || '')) return 'transport';
   if (/^(townhall|courthouse|police|post_office|bank|place_of_worship|social_facility)$/.test(tags.amenity || '') || tags.office) return 'services';
+  if (tags.amenity === 'bicycle_rental') return 'bike_rental';
+  if (tags.highway === 'bus_stop' || tags.bus === 'yes' || tags.trolleybus === 'yes') return 'bus_stop';
+  if (tags.railway === 'tram_stop' || tags.public_transport === 'tram') return 'tram_stop';
+  if (tags.healthcare) return 'health';
   if (tags.building) return 'building';
   return 'services';
 }

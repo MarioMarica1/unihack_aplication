@@ -12,7 +12,7 @@ export function applyBaseStyle(
   options: { buildings: boolean; places: boolean; dark?: boolean; buildings3d?: boolean },
 ) {
   for (const layer of map.getStyle().layers) {
-    if (/^(osm-|route-|mobility-|stpt-|satellite-)/.test(layer.id)) continue;
+    if (/^(osm-|route-|mobility-|stpt-|satellite-|municipal-|active-transport-)/.test(layer.id)) continue;
     if (options.dark) {
       const id = layer.id;
       if (layer.type === 'background') map.setPaintProperty(id, 'background-color', '#242f3e');

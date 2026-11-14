@@ -5,7 +5,10 @@ import type { MunicipalReport } from './municipal-reports';
 
 const sourceId = 'municipal-reports';
 const clusterId = 'municipal-report-clusters';
+const clusterCountId = 'municipal-report-cluster-count';
 const pointId = 'municipal-report-points';
+
+export const municipalReportLayerIds = [clusterId, clusterCountId, pointId] as const;
 
 export function showMunicipalReports(map: Map, reports: MunicipalReport[]) {
   const data: FeatureCollection<Point> = {
@@ -25,8 +28,8 @@ export function showMunicipalReports(map: Map, reports: MunicipalReport[]) {
     paint: { 'circle-color': '#554593', 'circle-radius': 17, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5 },
   });
   map.addLayer({
-    id: 'municipal-report-cluster-count', type: 'symbol', source: sourceId, filter: ['has', 'point_count'],
-    layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12 },
+    id: clusterCountId, type: 'symbol', source: sourceId, filter: ['has', 'point_count'],
+    layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Bold'], 'text-size': 12 },
     paint: { 'text-color': '#fff' },
   });
   map.addLayer({

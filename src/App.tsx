@@ -92,18 +92,25 @@ const defaultLayerVisibility: LayerVisibility = {
 };
 
 const municipalCategorii = [
+  'Trafic rutier și semne de circulație',
   'Străzi și trotuare',
-  'Iluminat public și semafoare',
-  'Salubritate și deșeuri',
-  'Spații verzi și parcuri',
-  'Transport public STPT',
-  'Parcări neregulamentare',
-  'Șantiere și lucrări publice',
-  'Semnalizare rutieră',
-  'Accesibilitate',
-  'Apă și canalizare',
-  'Ordine și siguranță publică',
-  'Clădiri și patrimoniu',
+  'Locuri de joacă și spații verzi',
+  'Salubrizare, dezinsecție, deratizare și deszăpezire',
+  'Iluminat public',
+  'Altele',
+  'Protecția mediului (Poliția Locală)',
+  'Apă, canalizare și termoficare',
+  'Transport în comun',
+  'Ordinea și liniștea publică (Poliția Locală)',
+  'Urbanism',
+  'Garaje, cimitire și toalete publice',
+  'Animale',
+  'Organizare și funcționare asociații de proprietari',
+  'Website si platformă de sesizări',
+  'Scoli si Spitale',
+  'Probleme de integritate referitoare la angajați',
+  'Probleme de integritate',
+  'Activitatea comercială (Poliția Locală)',
 ] as const;
 
 async function loadInfrastructureData<K extends LayerKey>(key: K): Promise<Infrastructure[K]> {
@@ -232,6 +239,8 @@ export default function App({
   const [reportsSourceFilter, setReportsSourceFilter] = useState<'all' | 'municipal' | 'citizen'>('all');
   const [reportsStatusFilter, setReportsStatusFilter] = useState<'all' | MunicipalStatus>('all');
   const [reportsCategoryFilter, setReportsCategoryFilter] = useState<string>('all');
+  const [reportsSubcategoryFilter, setReportsSubcategoryFilter] = useState<string>('all');
+  const [reportsVisibleLimit, setReportsVisibleLimit] = useState<number>(80);
 
   // News Feed Temporal Filter (Zilnic, Săptămânal, Lunar)
   const [newsTemporalWindow, setNewsTemporalWindow] = useState<TemporalWindow>('weekly');
@@ -420,6 +429,11 @@ export default function App({
         });
         break;
       case 'reports':
+        setReportsSourceFilter('all');
+        setReportsStatusFilter('all');
+        setReportsCategoryFilter('all');
+        setReportsSubcategoryFilter('all');
+        setReportsVisibleLimit(80);
         setLayers({
           tramways: false,
           busways: false,
@@ -427,6 +441,7 @@ export default function App({
           sidewalks: false,
           places: false,
         });
+        setMapFit(v => v + 1);
         break;
       case 'community':
         setLayers({
@@ -666,21 +681,53 @@ export default function App({
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [citizenReportPins, reportsSourceFilter, search]);
 
+  const municipalSourceList = useMemo(
+    () => (municipalFeed.allReports.length ? municipalFeed.allReports : municipalFeed.reports),
+    [municipalFeed.allReports, municipalFeed.reports],
+  );
+
+  const availableMunicipalCategories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const cat of municipalCategorii) counts.set(cat, 0);
+    for (const report of municipalSourceList) {
+      if (reportsStatusFilter !== 'all' && report.status !== reportsStatusFilter) continue;
+      counts.set(report.category, (counts.get(report.category) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [municipalSourceList, reportsStatusFilter]);
+
+  const availableMunicipalSubcategories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const report of municipalSourceList) {
+      if (reportsStatusFilter !== 'all' && report.status !== reportsStatusFilter) continue;
+      if (reportsCategoryFilter !== 'all' && report.category !== reportsCategoryFilter) continue;
+      counts.set(report.title, (counts.get(report.title) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [municipalSourceList, reportsStatusFilter, reportsCategoryFilter]);
+
   // Filtered Official Municipal Reports
   const visibleMunicipalReports = useMemo(() => {
     if (reportsSourceFilter === 'citizen') return [];
     const q = normalizeSearch(search);
-    const sourceList = municipalFeed.allReports.length ? municipalFeed.allReports : municipalFeed.reports;
-    return sourceList.filter(report => {
+    return municipalSourceList.filter(report => {
       if (reportsStatusFilter !== 'all' && report.status !== reportsStatusFilter) return false;
       if (reportsCategoryFilter !== 'all' && report.category !== reportsCategoryFilter) return false;
+      if (reportsSubcategoryFilter !== 'all' && report.title !== reportsSubcategoryFilter) return false;
       if (q) {
         const hay = normalizeSearch(`${report.number} ${report.title} ${report.category} ${report.description ?? ''}`);
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [municipalFeed.allReports, municipalFeed.reports, reportsSourceFilter, reportsStatusFilter, reportsCategoryFilter, search]);
+  }, [
+    municipalSourceList,
+    reportsSourceFilter,
+    reportsStatusFilter,
+    reportsCategoryFilter,
+    reportsSubcategoryFilter,
+    search,
+  ]);
 
   // News Feed Geo-Located Items for the Map when in 'news' tab
   const newsTemporalLimitMs = useMemo(() => {
@@ -2136,23 +2183,29 @@ export default function App({
                     <button
                       type="button"
                       className={reportsSourceFilter === 'all' ? 'active' : ''}
-                      onClick={() => setReportsSourceFilter('all')}
+                      onClick={() => {
+                        setReportsSourceFilter('all');
+                        setReportsStatusFilter('all');
+                        setReportsCategoryFilter('all');
+                        setReportsSubcategoryFilter('all');
+                        setReportsVisibleLimit(80);
+                      }}
                     >
-                      Toate ({visibleMunicipalReports.length + visibleCitizenReports.length})
+                      Toate ({municipalSourceList.length + citizenReportPins.length})
                     </button>
                     <button
                       type="button"
                       className={reportsSourceFilter === 'municipal' ? 'active' : ''}
                       onClick={() => setReportsSourceFilter('municipal')}
                     >
-                      <Building2 size={13} /> Oficiale PMT ({visibleMunicipalReports.length})
+                      <Building2 size={13} /> Oficiale PMT ({municipalSourceList.length})
                     </button>
                     <button
                       type="button"
                       className={reportsSourceFilter === 'citizen' ? 'active' : ''}
                       onClick={() => setReportsSourceFilter('citizen')}
                     >
-                      Cetățeni ({visibleCitizenReports.length})
+                      Cetățeni ({citizenReportPins.length})
                     </button>
                   </div>
 
@@ -2162,14 +2215,28 @@ export default function App({
                         <span>Stare oficială PMT</span>
                         <select
                           value={reportsStatusFilter}
-                          onChange={e => setReportsStatusFilter(e.target.value as 'all' | MunicipalStatus)}
+                          onChange={e => {
+                            setReportsStatusFilter(e.target.value as 'all' | MunicipalStatus);
+                            setReportsVisibleLimit(80);
+                            setMapFit(v => v + 1);
+                          }}
                         >
-                          <option value="all">Toate stările ({municipalFeed.allReports.length || municipalFeed.reports.length})</option>
-                          <option value="Inregistrata">Înregistrată</option>
-                          <option value="In lucru">În lucru</option>
-                          <option value="Finalizata">Finalizată</option>
-                          <option value="Asteapta clarificari">Așteaptă clarificări</option>
-                          <option value="Declinata competenta">Declinată competența</option>
+                          <option value="all">Toate stările ({municipalSourceList.length})</option>
+                          <option value="Inregistrata">
+                            Înregistrată ({municipalSourceList.filter(r => r.status === 'Inregistrata').length})
+                          </option>
+                          <option value="In lucru">
+                            În lucru ({municipalSourceList.filter(r => r.status === 'In lucru').length})
+                          </option>
+                          <option value="Finalizata">
+                            Finalizată ({municipalSourceList.filter(r => r.status === 'Finalizata').length})
+                          </option>
+                          <option value="Asteapta clarificari">
+                            Așteaptă clarificări ({municipalSourceList.filter(r => r.status === 'Asteapta clarificari').length})
+                          </option>
+                          <option value="Declinata competenta">
+                            Declinată competența ({municipalSourceList.filter(r => r.status === 'Declinata competenta').length})
+                          </option>
                         </select>
                       </label>
 
@@ -2177,16 +2244,67 @@ export default function App({
                         <span>Categorie Primărie</span>
                         <select
                           value={reportsCategoryFilter}
-                          onChange={e => setReportsCategoryFilter(e.target.value)}
+                          onChange={e => {
+                            setReportsCategoryFilter(e.target.value);
+                            setReportsSubcategoryFilter('all');
+                            setReportsVisibleLimit(80);
+                            setMapFit(v => v + 1);
+                          }}
                         >
-                          <option value="all">Toate categoriile (19)</option>
-                          {municipalCategorii.map(cat => (
+                          <option value="all">Toate categoriile ({availableMunicipalCategories.length})</option>
+                          {availableMunicipalCategories.map(([cat, count]) => (
                             <option key={cat} value={cat}>
-                              {cat}
+                              {cat} ({count})
                             </option>
                           ))}
                         </select>
                       </label>
+
+                      {reportsCategoryFilter !== 'all' && availableMunicipalSubcategories.length > 0 && (
+                        <label className="compact-select-field" style={{ gridColumn: '1 / -1' }}>
+                          <span>Subcategorie Primărie ({reportsCategoryFilter})</span>
+                          <select
+                            value={reportsSubcategoryFilter}
+                            onChange={e => {
+                              setReportsSubcategoryFilter(e.target.value);
+                              setReportsVisibleLimit(80);
+                              setMapFit(v => v + 1);
+                            }}
+                          >
+                            <option value="all">
+                              Toate subcategoriile ({availableMunicipalSubcategories.reduce((acc, [, c]) => acc + c, 0)})
+                            </option>
+                            {availableMunicipalSubcategories.map(([subcat, count]) => (
+                              <option key={subcat} value={subcat}>
+                                {subcat} ({count})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                    </div>
+                  )}
+
+                  {(reportsStatusFilter !== 'all' ||
+                    reportsCategoryFilter !== 'all' ||
+                    reportsSubcategoryFilter !== 'all') && (
+                    <div className="results-heading" style={{ padding: '4px 16px 8px' }}>
+                      <span className="results-count">
+                        Rezultate filtrate: <strong>{visibleMunicipalReports.length}</strong> sesizări PMT
+                      </span>
+                      <button
+                        type="button"
+                        className="stop-route-btn"
+                        onClick={() => {
+                          setReportsStatusFilter('all');
+                          setReportsCategoryFilter('all');
+                          setReportsSubcategoryFilter('all');
+                          setReportsVisibleLimit(80);
+                          setMapFit(v => v + 1);
+                        }}
+                      >
+                        Resetează filtrele
+                      </button>
                     </div>
                   )}
 
@@ -2195,7 +2313,7 @@ export default function App({
                       visibleCitizenReports.map(pin => renderPinCard(pin))}
 
                     {reportsSourceFilter !== 'citizen' &&
-                      visibleMunicipalReports.slice(0, 60).map(r => (
+                      visibleMunicipalReports.slice(0, reportsVisibleLimit).map(r => (
                         <article
                           className={`pin-card municipal-card ${selectedMunicipalNumber === r.number ? 'is-selected' : ''}`}
                           key={r.number}
@@ -2237,10 +2355,39 @@ export default function App({
                         </article>
                       ))}
 
+                    {reportsSourceFilter !== 'citizen' &&
+                      visibleMunicipalReports.length > reportsVisibleLimit && (
+                        <button
+                          type="button"
+                          className="secondary full"
+                          onClick={() => setReportsVisibleLimit(prev => prev + 80)}
+                        >
+                          Afișează încă 80 de sesizări ({visibleMunicipalReports.length - reportsVisibleLimit} rămase)
+                        </button>
+                      )}
+
                     {visibleCitizenReports.length === 0 && visibleMunicipalReports.length === 0 && (
                       <div className="empty-state">
                         <AlertTriangle size={28} />
                         <h3>Nicio sesizare pentru filtrele selectate</h3>
+                        {(reportsStatusFilter !== 'all' ||
+                          reportsCategoryFilter !== 'all' ||
+                          reportsSubcategoryFilter !== 'all' ||
+                          reportsSourceFilter !== 'all') && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => {
+                              setReportsSourceFilter('all');
+                              setReportsStatusFilter('all');
+                              setReportsCategoryFilter('all');
+                              setReportsSubcategoryFilter('all');
+                              setReportsVisibleLimit(80);
+                            }}
+                          >
+                            Resetează toate filtrele ({municipalSourceList.length} sesizări)
+                          </button>
+                        )}
                         <button type="button" className="primary" onClick={() => openCreateReport()}>
                           <Plus size={15} /> Adaugă o sesizare
                         </button>

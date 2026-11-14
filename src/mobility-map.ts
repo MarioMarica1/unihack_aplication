@@ -6,6 +6,7 @@ import { tramColors, withTramLabels } from './tram-lines';
 import type { LiveVehicleType } from './stpt-live';
 import { transitLayerIds } from './transit-map';
 import { placeLayerIds } from './place-map';
+import { municipalReportLayerIds } from './municipal-reports-map';
 import { busLineColor, normalizeLine } from './transport-colors';
 
 const lineGroups = [
@@ -58,6 +59,7 @@ export function orderMobilityLayers(map: Map) {
     busLabels,
     tramLabels,
     ...placeLayerIds,
+    ...municipalReportLayerIds,
     liveVehiclesLayerId,
     liveVehiclesArrowLayerId,
   ]) {

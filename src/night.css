@@ -36,6 +36,9 @@
   background: var(--night-surface);
   border-color: var(--night-surface);
 }
+[data-theme="dark"] .map-first .create-form .form-actions {
+  background: var(--night-surface);
+}
 [data-theme="dark"] .map-first .data-notes { background: transparent; border: 0; }
 [data-theme="dark"] .map-first .map-area { background: var(--night-bg); }
 [data-theme="dark"] .map-first :is(.primary, .message-composer button) { background: #215fbf; color: #fff; }

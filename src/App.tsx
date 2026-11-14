@@ -451,8 +451,10 @@ export default function App({ cloud }: { cloud?: Cloud }) {
     <header className="app-header">
       <div className="header-identity">
         <button className="app-brand" aria-label="Urban Conect — harta principală" onClick={() => { switchView('explore'); setPanelOpen(false); }}>
-          <img className="brand-icon" src="/favicon.svg" width={43} height={43} alt="" />
-          <span className="brand-wordmark" aria-hidden="true">urban <span>conect</span></span>
+          <picture className="brand-logo">
+            <source media="(max-width: 760px)" srcSet="/urban-connect-icon.webp" />
+            <img src={theme === 'dark' ? '/urban-connect-logo-v4-dark.png' : '/urban-connect-logo-v4.png'} alt="" />
+          </picture>
         </button>
         <span className="header-city"><MapPin size={15} />Timișoara</span>
       </div>

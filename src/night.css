@@ -29,8 +29,6 @@
   border-color: var(--night-border);
   color: var(--night-text);
 }
-[data-theme="dark"] .app-brand > .brand-wordmark { color: var(--night-text); }
-[data-theme="dark"] .brand-wordmark > span { color: var(--night-accent); }
 [data-theme="dark"] .map-first .detail-toolbar,
 [data-theme="dark"] .map-first .travel-mode-picker {
   background: var(--night-surface);

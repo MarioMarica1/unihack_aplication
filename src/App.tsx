@@ -7,6 +7,7 @@ import { compressPhoto, dispatch, loadState, photoAccept, subscribe } from './st
 import { calculateRoute, travelModes } from './routing';
 import type { RouteResult, TravelMode } from './routing';
 import { planTransit } from './transitRouter';
+import RouteChat from './RouteChat';
 import TransitResults from './TransitResults';
 import MapLayersPanel from './MapLayersPanel';
 import PlacesPanel, { normalizeSearch, placeLink } from './PlacesPanel';
@@ -198,7 +199,7 @@ export default function App({ cloud }: { cloud?: Cloud }) {
   }, [tramways.data]);
   const busways = useMapData('busways', mapVisibility.busways);
   const sidewalks = useMapData('sidewalks', mapVisibility.sidewalks);
-  const places = useMapData('places', mapVisibility.places || view === 'places' || mapVisibility.cycleways || mapVisibility.tramways || mapVisibility.busways);
+  const places = useMapData('places', mapVisibility.places || view === 'places' || view === 'routes' || mapVisibility.cycleways || mapVisibility.tramways || mapVisibility.busways);
   const placeCatalog = useMemo(() => buildPlaceCatalog(places.data), [places.data]);
   const filteredPlaces = useMemo(() => filterPlaces(placeCatalog, query, placeCategory), [placeCatalog, query, placeCategory]);
   const allMapPlaces = useMemo(() => filterPlaces(placeCatalog, '', 'all'), [placeCatalog]);
@@ -328,6 +329,16 @@ export default function App({ cloud }: { cloud?: Cloud }) {
     if (routeWaypoints.length !== waypoints.length || routeWaypoints.some((p, index) => p !== waypoints[index])) setWaypoints(routeWaypoints);
   }, [stopLocations, allPins]);
   useEffect(() => { invalidateRoute(); }, [stopLocations]);
+  const [chatRouteRequest, setChatRouteRequest] = useState(0);
+  useEffect(() => { if (chatRouteRequest) void buildRoute(); }, [chatRouteRequest]);
+  function applyChatRoute(origin: MapPlace | undefined, stops: MapPlace[], mode: TravelMode | 'transit' | null) {
+    setRouteOptionsFor(null);
+    if (origin) setStart(origin.location);
+    setWaypoints(stops.slice(0, -1));
+    setDestination(stops[stops.length - 1]);
+    if (mode) setTravelMode(mode);
+    setChatRouteRequest(request => request + 1);
+  }
   async function act(action: Action, success?: string) {
     if (!user.id) { setModal('profile'); throw new Error('Conectează-te pentru a continua.'); }
     if (busy) throw new Error('Așteaptă finalizarea salvării curente.');
@@ -472,6 +483,7 @@ export default function App({ cloud }: { cloud?: Cloud }) {
           {selectedId && !picking ? (selectedMunicipal ? <MunicipalDetail report={selectedMunicipal} close={closeDetail} /> : selected ? <Detail pin={selected} state={state} profiles={profiles} canShare={!!cloud || !!selected.demo} userId={user.id} busy={busy} close={closeDetail} act={act} edit={() => openForm(selected.type, selected)} createActivity={() => openForm('activity', undefined, selected)} addStop={() => { addRouteLocation(selected); switchView('routes'); }} inRoute={destination?.id === selected.id || waypoints.some(item => item.id === selected.id)} openRelated={select} notify={setToast} openChat={trigger => openChat(selected.id, trigger)} chatOpen={chatId === selected.id} /> : <div className="detail-panel"><div className="detail-toolbar"><button className="icon-btn" aria-label="Înapoi" onClick={closeDetail}><ArrowLeft size={20} /></button></div><div className="empty-state"><MapPin size={30} /><h2>{selectedId.startsWith('pmt:') && municipalReports.loading ? 'Se încarcă sesizarea…' : 'Pin indisponibil'}</h2><p>{selectedId.startsWith('pmt:') ? 'Sesizările Primăriei apar în Comunitate cât timp sunt active și au cel mult 30 de zile.' : cloud ? 'Pinul a fost retras sau linkul nu mai este valid.' : 'Linkul poate indica un pin retras sau creat în alt browser.'}</p></div></div>) : <>
           <div className="sidebar-content" ref={sidebarScroll}>
             {view === 'layers' && !activePlace ? <>{inspection && <div className="infrastructure-inspection"><button className="icon-btn" aria-label="Închide informația despre strat" onClick={() => setInspection(undefined)}><X size={16} /></button><strong>{inspection.title}</strong><p>{inspection.description}</p></div>}<MapLayersPanel tramRefs={tramRefs} live={<StptLivePanel enabled={liveEnabled} toggle={() => setLiveEnabled(enabled => !enabled)} kind={liveType} setKind={type => { setLiveType(type); setLiveLine(''); }} line={liveLine} setLine={setLiveLine} status={liveStatus} count={liveVehicles.length} />} visibility={visibility} toggle={toggleLayer} layers={{ cycleways, tramways, busways, sidewalks, places }} buildings={buildings} setBuildings={setBuildings} /></> : (view === 'places' || (view === 'layers' && activePlace)) ? <PlacesPanel places={places.data ? (view === 'places' ? filteredPlaces : allMapPlaces) : undefined} detailsInLayers={view === 'layers'} query={query} category={placeCategory} setCategory={setPlaceCategory} error={places.error} retry={places.retry} select={inspectPlace} selected={activePlace} clear={() => setActivePlace(undefined)} add={addPlace} create={place => openForm('activity', undefined, undefined, place)} share={setSharedPlace} /> : view === 'routes' ? <><div className="panel-intro"><h1>Planifică un traseu</h1><p>Alege modul de transport, o destinație și opriri opționale.</p></div><div className="route-planner">
+            <RouteChat catalog={placeCatalog} onPlan={applyChatRoute} />
             <div className="travel-mode-picker" role="group" aria-label="Mod de transport">{(['walking', 'cycling', 'driving', 'transit'] as const).map(mode => <button key={mode} className={travelMode === mode ? 'active' : ''} aria-pressed={travelMode === mode} onClick={() => { if (mode !== travelMode) { setTravelMode(mode); invalidateRoute(); } }}>{mode === 'walking' ? <Footprints size={18} /> : mode === 'cycling' ? <Bike size={18} /> : mode === 'driving' ? <Car size={18} /> : <TrainFront size={18} />}<span>{mode === 'transit' ? 'Transport public' : travelModes[mode].label}</span></button>)}</div>
             <div className="route-notice"><Route size={18} />{travelMode === 'transit' ? <p><strong>Traseu cu transportul public</strong><br />Calcul pe rețeaua STPT, cu deplasare pe jos între stații când este necesar.</p> : <p><strong>Traseu {travelMode === 'walking' ? 'pietonal' : travelMode === 'cycling' ? 'pentru bicicletă' : 'auto'}</strong><br />Calcul pe rețeaua {travelMode === 'walking' ? 'pietonală' : travelMode === 'cycling' ? 'accesibilă bicicletelor' : 'rutieră auto'}, cu profil OSRM dedicat.</p>}</div>
             <label className="field-label">PUNCT DE PORNIRE</label><div className="route-start"><span className="start-dot" /><div><strong>{start.lon === center.lon && start.lat === center.lat ? 'Centrul Timișoarei' : 'Punctul ales'}</strong><small>{start.lat.toFixed(5)}, {start.lon.toFixed(5)}</small></div></div>

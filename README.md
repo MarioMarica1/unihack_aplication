@@ -22,6 +22,8 @@ npm.cmd run build
 npm.cmd run preview -- --port 5174
 ```
 
+To enable **Trasee → Chat de trasee**, add `GEMINI_API_KEY` to the ignored `.env.local` file and restart Vite. On Netlify, set the same variable for Functions. The server sends the request and recent chat messages to Gemini 3.8 Flash to extract the stops. The app locates them in the Timișoara catalog and calculates the route with the existing planner.
+
 In **Comunitate**, the **Sesizarile Primariei** switch appears next to **Filtre** when **Sesizări** is selected. The switch is enabled by default. Public reports marked **Depusă** or **În lucru** from the last 30 days are refreshed every minute. Reports without coordinates appear in the list and each entry links to the municipal portal. Authors can mark their community reports **Raportată la Primărie** after submitting them there.
 
 ## What the demo does

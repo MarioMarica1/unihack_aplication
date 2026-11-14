@@ -8,7 +8,7 @@ function municipalReportsApi(): Plugin {
   const middleware: Connect.NextHandleFunction = (request, response, next) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
     if (url.pathname !== municipalReportsPath) { next(); return; }
-    void municipalReportsResponse(url).then(async result => {
+    void municipalReportsResponse().then(async result => {
       response.writeHead(result.status, Object.fromEntries(result.headers));
       response.end(await result.text());
     }).catch(next);

@@ -1,7 +1,6 @@
-import { Popup } from 'maplibre-gl';
 import type { GeoJSONSource, Map, MapMouseEvent } from 'maplibre-gl';
 import type { FeatureCollection, Point } from 'geojson';
-import { municipalReportUrl, municipalStatuses } from './municipal-reports';
+import { municipalStatuses } from './municipal-reports';
 import type { MunicipalReport } from './municipal-reports';
 
 const sourceId = 'municipal-reports';
@@ -41,7 +40,7 @@ export function municipalFeatureAt(map: Map, point: MapMouseEvent['point']) {
   return layers.length ? map.queryRenderedFeatures(point, { layers })[0] : undefined;
 }
 
-export function openMunicipalFeature(map: Map, feature: NonNullable<ReturnType<typeof municipalFeatureAt>>, reports: MunicipalReport[], dark: boolean) {
+export function openMunicipalFeature(map: Map, feature: NonNullable<ReturnType<typeof municipalFeatureAt>>, select: (number: string) => void) {
   if (feature.geometry.type !== 'Point') return;
   const [lon, lat] = feature.geometry.coordinates;
   if (feature.layer.id === clusterId) {
@@ -51,21 +50,5 @@ export function openMunicipalFeature(map: Map, feature: NonNullable<ReturnType<t
     }).catch(() => undefined);
     return;
   }
-  const report = reports.find(report => report.number === feature.properties.number);
-  if (!report) return;
-  const content = document.createElement('div');
-  content.className = 'municipal-report-popup';
-  const title = document.createElement('strong');
-  title.textContent = 'Sesizare Primăria Timișoara';
-  const details = document.createElement('p');
-  details.textContent = [municipalStatuses[report.status].label, report.category,
-    new Date(report.createdAt).toLocaleDateString('ro-RO')].filter(Boolean).join(' · ');
-  const link = document.createElement('a');
-  link.href = municipalReportUrl(report.number);
-  link.textContent = report.number;
-  link.target = '_blank';
-  link.rel = 'noreferrer';
-  content.append(title, details, link);
-  return new Popup({ className: dark ? 'municipal-popup-dark' : undefined, maxWidth: '260px' })
-    .setLngLat([lon, lat]).setDOMContent(content).addTo(map);
+  if (typeof feature.properties.number === 'string') select(feature.properties.number);
 }

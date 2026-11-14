@@ -32,6 +32,8 @@ type Props = {
   mobilePanelOpen: boolean;
   liveVehicles: LiveVehicle[];
   municipalReports?: MunicipalReport[];
+  selectedMunicipal?: MunicipalReport;
+  onSelectMunicipal: (number: string) => void;
   labels: boolean; mapFit: number; buildings: boolean; focusedPlace?: MapPlace;
   onInspectPlace: (place: MapPlace) => void; onInspectLine: (info: { title: string; description: string }) => void;
 };
@@ -54,7 +56,6 @@ export default function MapCanvas(props: Props) {
   const styleDeadline = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastFittedRoute = useRef<{ instance: maplibregl.Map; route: RouteResult | TransitOption; panelOpen: boolean } | undefined>(undefined);
   const hitLayers = useRef<string[]>([]);
-  const municipalPopup = useRef<maplibregl.Popup | undefined>(undefined);
   const [ready, setReady] = useState(0); const [settled, setSettled] = useState(false); const [error, setError] = useState(false); const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!container.current) return;
@@ -81,8 +82,7 @@ export default function MapCanvas(props: Props) {
       if (latest.current.municipalReports?.length) {
         const feature = municipalFeatureAt(instance, event.point);
         if (feature) {
-          municipalPopup.current?.remove();
-          municipalPopup.current = openMunicipalFeature(instance, feature, latest.current.municipalReports, appliedTheme.current === 'dark');
+          openMunicipalFeature(instance, feature, latest.current.onSelectMunicipal);
           return;
         }
       }
@@ -213,12 +213,18 @@ export default function MapCanvas(props: Props) {
     const instance = map.current;
     if (!instance || !styleReady.current) return;
     showMunicipalReports(instance, props.municipalReports ?? []);
-    return () => { municipalPopup.current?.remove(); municipalPopup.current = undefined; };
   }, [props.municipalReports, ready]);
+
+  const municipalCoordinates = props.selectedMunicipal?.coordinates;
+  useEffect(() => {
+    if (!municipalCoordinates || !map.current) return;
+    map.current.easeTo({ center: municipalCoordinates, zoom: Math.max(map.current.getZoom(), 16) });
+  }, [municipalCoordinates?.[0], municipalCoordinates?.[1], attempt]);
 
   useEffect(() => {
     const instance = map.current; if (!instance || !props.mapFit) return;
     const bounds = new maplibregl.LngLatBounds(); props.pins.forEach(pin => bounds.extend([pin.location.lon, pin.location.lat]));
+    props.municipalReports?.forEach(report => { if (report.coordinates) bounds.extend(report.coordinates); });
     if (!bounds.isEmpty()) instance.fitBounds(bounds, { padding: { top: 40, left: 40, right: 50, bottom: 40 }, maxZoom: 15.6, duration: 500 });
   }, [props.mapFit]);
   useEffect(() => {

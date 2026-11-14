@@ -17,6 +17,7 @@ export type Pin = {
   startsAt?: string; endsAt?: string; capacity?: number;
   participants: string[]; supports: string[]; relatedId?: string;
   changedAt?: string;
+  reportedToMunicipality?: boolean;
 };
 export type Message = { id: string; pinId: string; authorId: string; body: string; createdAt: string };
 export type State = { version: 1; pins: Pin[]; messages: Message[]; saved: Record<string, string[]>; flags: { pinId: string; userId: string; reason: string }[]; people?: Person[] };
@@ -51,6 +52,7 @@ export type FormInput = z.infer<typeof formSchema>;
 export type Action =
   | { type: 'create'; input: FormInput; userId: string; id: string }
   | { type: 'edit'; pinId: string; input: FormInput; userId: string }
+  | { type: 'setMunicipalReported'; pinId: string; userId: string; enabled: boolean }
   | { type: 'support' | 'join' | 'resolve' | 'cancel' | 'delete' | 'save'; pinId: string; userId: string; enabled?: boolean }
   | { type: 'message'; pinId: string; userId: string; body: string; id: string }
   | { type: 'deleteMessage'; messageId: string; userId: string }
@@ -75,8 +77,12 @@ export function mutate(original: State, action: Action): State {
   }
   const pin = state.pins.find(p => p.id === action.pinId && !p.deleted);
   if (!pin) throw new Error('Acest pin a fost retras sau nu mai este disponibil.');
-  if (['edit', 'resolve', 'cancel', 'delete'].includes(action.type) && pin.authorId !== action.userId) throw new Error('Doar autorul poate face această modificare.');
+  if (['edit', 'resolve', 'cancel', 'delete', 'setMunicipalReported'].includes(action.type) && pin.authorId !== action.userId) throw new Error('Doar autorul poate face această modificare.');
   switch (action.type) {
+    case 'setMunicipalReported':
+      if (pin.type !== 'report') throw new Error('Acțiunea este disponibilă doar pentru sesizări.');
+      pin.reportedToMunicipality = action.enabled;
+      break;
     case 'edit': {
       const input = formSchema.parse(action.input);
       if (input.type !== pin.type) throw new Error('Tipul pinului nu poate fi schimbat.');

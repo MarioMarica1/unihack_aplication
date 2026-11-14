@@ -22,7 +22,7 @@ npm.cmd run build
 npm.cmd run preview -- --port 5174
 ```
 
-In **Straturi hartă**, enable **Sesizări Primărie** to browse public reports marked **Depusă** or **În lucru** since 2022. Reports without coordinates are available in the list. While the layer is open, the last 30 days refresh every minute and older reports refresh hourly. Each entry links to the municipality's original report. Vite and Netlify provide the same read-only adapter at `/api/municipal-reports`.
+In **Comunitate → Filtre**, **Include sesizările Primăriei** is enabled by default. Public reports marked **Depusă** or **În lucru** from the last 30 days are refreshed every minute. Reports without coordinates appear in the list and each entry links to the municipal portal. Authors can mark their community reports **Raportată la Primărie** after submitting them there.
 
 ## What the demo does
 
@@ -48,9 +48,10 @@ Use a branch for each change and open a pull request into `main`. Both original 
 ## Shared mode on Supabase
 
 1. In the intended development project, apply [the Vecin migration](supabase/migrations/202611120001_vecin.sql) with Supabase CLI or SQL Editor. It creates private application tables, the public read/write RPCs, the photo bucket and the Realtime revision table.
-2. Configure Google sign-in as described below and add the application's origin and intended pin redirect paths to the Auth redirect allow list. Existing confirmed accounts can still use the password option. When Google is disabled, the app also offers email links. These links must be opened in the same browser profile that requested them, and delivery to the public requires custom SMTP.
-3. Set `VITE_APP_MODE=cloud`, `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in ignored `.env.local` or in the Netlify build environment. Netlify builds `dist` and serves direct SPA links using `netlify.toml`.
-4. With two browser profiles or devices, sign in, publish a new pin with a photo, open its shared link and exchange messages. Have two users try to claim the last spot and verify one can claim it. Check that a different user cannot edit the pin or remove its photo.
+2. Apply [the municipal reporting migration](supabase/migrations/202611140001_municipal_reporting.sql) to enable the report marker in shared mode.
+3. Configure Google sign-in as described below and add the application's origin and intended pin redirect paths to the Auth redirect allow list. Existing confirmed accounts can still use the password option. When Google is disabled, the app also offers email links. These links must be opened in the same browser profile that requested them, and delivery to the public requires custom SMTP.
+4. Set `VITE_APP_MODE=cloud`, `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in ignored `.env.local` or in the Netlify build environment. Netlify builds `dist` and serves direct SPA links using `netlify.toml`.
+5. With two browser profiles or devices, sign in, publish a new pin with a photo, open its shared link and exchange messages. Have two users try to claim the last spot and verify one can claim it. Check that a different user cannot edit the pin or remove its photo.
 
 In shared mode, published pins, photos and messages are public, saved pins are account-specific, and reports of inappropriate content are stored for review by the project operator. The hackathon UI shows the latest 100 messages per pin.
 

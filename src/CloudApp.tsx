@@ -38,6 +38,11 @@ function cloudStore(client: SupabaseClient) {
   }
 
   async function dispatch(action: Action) {
+    if (action.type === 'setMunicipalReported') {
+      const { data, error } = await client.rpc('vecin_set_municipal_reported', { target: action.pinId, reported: action.enabled });
+      if (error) throw new Error(error.code === 'P0001' ? error.message : 'Marcajul nu a putut fi salvat.');
+      return toState(data);
+    }
     let payload: Record<string, unknown> = action;
     let uploaded: string | undefined;
     if (action.type === 'create' || action.type === 'edit') {

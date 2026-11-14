@@ -17,7 +17,8 @@ import type { Infrastructure, LayerKey, LayerVisibility, MapPlace } from './infr
 import StptLivePanel from './StptLivePanel';
 import { useStptVehicles } from './stpt-live';
 import { useMunicipalReports } from './useMunicipalReports';
-import MunicipalReportsPanel from './MunicipalReportsPanel';
+import { municipalReportId, municipalReportsPortal, municipalReportUrl, municipalStatuses } from './municipal-reports';
+import type { MunicipalReport } from './municipal-reports';
 import type { LiveVehicleType } from './stpt-live';
 import { buildPlaceCatalog, filterPlaces } from './place-catalog';
 
@@ -106,6 +107,29 @@ function routeLocationSource(id: string) {
   return 'Pin al comunității';
 }
 
+function MunicipalDetail({ report, close }: { report: MunicipalReport; close: () => void }) {
+  const title = useRef<HTMLHeadingElement>(null);
+  useEffect(() => title.current?.focus({ preventScroll: true }), [report.number]);
+  return <aside className="detail-panel" aria-label={report.title}>
+    <div className="detail-toolbar"><button className="icon-btn" aria-label="Înapoi" onClick={close}><ArrowLeft size={20} /></button></div>
+    <div className="detail-scroll"><div className="detail-content">
+      <div className="detail-badges"><span className="type-label report">Primăria Timișoara</span><span className="status-badge">{municipalStatuses[report.status].label}</span></div>
+      <h2 ref={title} tabIndex={-1}>{report.title}</h2>
+      <p className="detail-description">{report.number} · {dateLabel(report.createdAt)}</p>
+      <a className="action-link" href={municipalReportUrl(report.number)} target="_blank" rel="noreferrer"><ExternalLink size={16} />Vezi sesizarea pe portalul Primăriei</a>
+    </div></div>
+  </aside>;
+}
+
+function MunicipalCard({ report, select }: { report: MunicipalReport; select: () => void }) {
+  return <article className="pin-card">
+    <button type="button" className="card-main" data-pin-id={municipalReportId(report.number)} onClick={select}>
+      <div className="card-top"><span className="type-label report">{iconFor('report', 14)}Primăria Timișoara</span><span className="status-badge">{municipalStatuses[report.status].label}</span></div>
+      <h3>{report.title}</h3><p className="place">{report.number} · {dateLabel(report.createdAt)}</p>
+    </button>
+  </article>;
+}
+
 const localStore = { loadState, dispatch, subscribe };
 const guest: typeof people[number] = { id: '', name: 'Vizitator', initials: '', color: '#e9f2ee' };
 type Cloud = { store: typeof localStore; user: typeof guest | null; account: ReactNode; reopenAccount?: boolean };
@@ -137,8 +161,9 @@ export default function App({ cloud }: { cloud?: Cloud }) {
   const [toast, setToast] = useState<{ text: string; error?: boolean }>(); const [busy, setBusy] = useState(false);
   const [visibility, setVisibility] = useState<LayerVisibility>(hiddenLayers); const [pinLabels, setPinLabels] = useState(false); const [mapFit, setMapFit] = useState(0);
   const [liveEnabled, setLiveEnabled] = useState(false);
-  const [municipalEnabled, setMunicipalEnabled] = useState(false);
-  const municipalVisible = view === 'layers' && municipalEnabled && !picking;
+  const [municipalEnabled, setMunicipalEnabled] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(30);
+  const municipalVisible = view === 'explore' && community.report && municipalEnabled && !picking;
   const municipalReports = useMunicipalReports(municipalVisible);
   const [liveType, setLiveType] = useState<LiveVehicleType | ''>('');
   const [liveLine, setLiveLine] = useState('');
@@ -270,10 +295,24 @@ export default function App({ cloud }: { cloud?: Cloud }) {
   const communityPins = useMemo(() => currentPins.filter(pin => community[pin.type]), [currentPins, community]);
   const savedIds = state?.saved[user.id] || [];
   const searchTerm = normalizeSearch(query);
+  const officialReports = useMemo(() => municipalVisible ? municipalReports.reports.filter(report =>
+    normalizeSearch(`${report.title} ${report.category} ${report.number} ${municipalStatuses[report.status].label} Primărie`).includes(searchTerm)
+  ) : [], [municipalVisible, municipalReports.reports, searchTerm]);
+  const selectedMunicipal = municipalVisible ? municipalReports.reports.find(report => municipalReportId(report.number) === selectedId) : undefined;
   const pins = useMemo(() => (view === 'saved' ? allPins : communityPins).filter(p => {
     if (view === 'saved' && !savedIds.includes(p.id)) return false;
     return normalizeSearch(`${p.title} ${p.description} ${p.place} ${p.category}`).includes(searchTerm);
-  }).sort((a, b) => sort === 'near' ? distance(locationPoint || center, a.location) - distance(locationPoint || center, b.location) : Date.parse(b.createdAt) - Date.parse(a.createdAt)), [allPins, view, savedIds, communityPins, searchTerm, sort, locationPoint]);
+  }), [allPins, view, savedIds, communityPins, searchTerm]);
+  const communityResults = useMemo(() => {
+    const point = locationPoint ?? center;
+    const results = [
+      ...pins.map(pin => ({ kind: 'community' as const, pin, date: Date.parse(pin.createdAt), meters: distance(point, pin.location) })),
+      ...officialReports.map(report => ({ kind: 'municipal' as const, report, date: Date.parse(report.createdAt),
+        meters: report.coordinates ? distance(point, { lon: report.coordinates[0], lat: report.coordinates[1] }) : Infinity })),
+    ];
+    return results.sort((a, b) => (sort === 'near' ? a.meters - b.meters : 0) || b.date - a.date);
+  }, [pins, officialReports, sort, locationPoint]);
+  useEffect(() => { setVisibleCount(30); }, [view, query, community, municipalEnabled, sort]);
   const mapPins = useMemo(() => {
     if (picking || (view !== 'explore' && view !== 'saved')) return [];
     return selected && !pins.includes(selected) ? [...pins, selected] : pins;
@@ -408,7 +447,7 @@ export default function App({ cloud }: { cloud?: Cloud }) {
   }
   if (fatal && !state) return <main className="fatal"><TriangleAlert size={40} /><h1>Nu am putut deschide datele</h1><p>{fatal}</p><button className="primary" onClick={() => location.reload()}>Reîncearcă</button></main>;
   if (!state) return <main className="fatal"><span className="spinner" /><h2>Pregătim cartierul tău…</h2></main>;
-  return <div className={`app-shell map-first ${panelOpen ? 'panel-open' : ''} ${selected ? 'pin-open' : ''} ${chatPin ? 'chat-open' : ''}`}>
+  return <div className={`app-shell map-first ${panelOpen ? 'panel-open' : ''} ${selectedId ? 'pin-open' : ''} ${chatPin ? 'chat-open' : ''}`}>
     <header className="app-header">
       <div className="header-identity">
         <button className="app-brand" aria-label="Urban Conect — harta principală" onClick={() => { switchView('explore'); setPanelOpen(false); }}>
@@ -428,9 +467,9 @@ export default function App({ cloud }: { cloud?: Cloud }) {
         <aside className="discovery" aria-label="Panou hartă">
           <nav className="sidebar-tabs" aria-label="Instrumentele hărții">{([['explore','Comunitate'],['places','Locuri'],['routes','Traseu'],['layers','Straturi']] as const).map(([key,label]) => <button key={key} className={view === key || (view === 'saved' && key === 'explore') ? 'active' : ''} aria-current={view === key ? 'page' : undefined} onClick={() => switchView(key)}>{label}</button>)}</nav>
           {!selectedId && <div className="mobile-panel-heading"><button className="icon-btn" aria-label="Închide panoul" onClick={closeToolPanel}><X size={18} /></button></div>}
-          {selectedId && !picking ? (selected ? <Detail pin={selected} state={state} profiles={profiles} canShare={!!cloud || !!selected.demo} userId={user.id} busy={busy} close={closeDetail} act={act} edit={() => openForm(selected.type, selected)} createActivity={() => openForm('activity', undefined, selected)} addStop={() => { addRouteLocation(selected); switchView('routes'); }} inRoute={destination?.id === selected.id || waypoints.some(item => item.id === selected.id)} openRelated={select} notify={setToast} openChat={trigger => openChat(selected.id, trigger)} chatOpen={chatId === selected.id} /> : <div className="detail-panel"><div className="detail-toolbar"><button className="icon-btn" aria-label="Înapoi" onClick={closeDetail}><ArrowLeft size={20} /></button></div><div className="empty-state"><MapPin size={30} /><h2>Pin indisponibil</h2><p>{cloud ? 'Pinul a fost retras sau linkul nu mai este valid.' : 'Linkul poate indica un pin retras sau creat în alt browser.'}</p></div></div>) : <>
+          {selectedId && !picking ? (selectedMunicipal ? <MunicipalDetail report={selectedMunicipal} close={closeDetail} /> : selected ? <Detail pin={selected} state={state} profiles={profiles} canShare={!!cloud || !!selected.demo} userId={user.id} busy={busy} close={closeDetail} act={act} edit={() => openForm(selected.type, selected)} createActivity={() => openForm('activity', undefined, selected)} addStop={() => { addRouteLocation(selected); switchView('routes'); }} inRoute={destination?.id === selected.id || waypoints.some(item => item.id === selected.id)} openRelated={select} notify={setToast} openChat={trigger => openChat(selected.id, trigger)} chatOpen={chatId === selected.id} /> : <div className="detail-panel"><div className="detail-toolbar"><button className="icon-btn" aria-label="Înapoi" onClick={closeDetail}><ArrowLeft size={20} /></button></div><div className="empty-state"><MapPin size={30} /><h2>{selectedId.startsWith('pmt:') && municipalReports.loading ? 'Se încarcă sesizarea…' : 'Pin indisponibil'}</h2><p>{selectedId.startsWith('pmt:') ? 'Sesizările Primăriei apar în Comunitate cât timp sunt active și au cel mult 30 de zile.' : cloud ? 'Pinul a fost retras sau linkul nu mai este valid.' : 'Linkul poate indica un pin retras sau creat în alt browser.'}</p></div></div>) : <>
           <div className="sidebar-content" ref={sidebarScroll}>
-            {view === 'layers' && !activePlace ? <>{inspection && <div className="infrastructure-inspection"><button className="icon-btn" aria-label="Închide informația despre strat" onClick={() => setInspection(undefined)}><X size={16} /></button><strong>{inspection.title}</strong><p>{inspection.description}</p></div>}<MapLayersPanel municipal={{ enabled: municipalEnabled, toggle: () => setMunicipalEnabled(enabled => !enabled), panel: <MunicipalReportsPanel feed={municipalReports} /> }} tramRefs={tramRefs} live={<StptLivePanel enabled={liveEnabled} toggle={() => setLiveEnabled(enabled => !enabled)} kind={liveType} setKind={type => { setLiveType(type); setLiveLine(''); }} line={liveLine} setLine={setLiveLine} status={liveStatus} count={liveVehicles.length} />} visibility={visibility} toggle={toggleLayer} layers={{ cycleways, tramways, busways, sidewalks, places }} buildings={buildings} setBuildings={setBuildings} /></> : (view === 'places' || (view === 'layers' && activePlace)) ? <PlacesPanel places={places.data ? (view === 'places' ? filteredPlaces : allMapPlaces) : undefined} detailsInLayers={view === 'layers'} query={query} category={placeCategory} setCategory={setPlaceCategory} error={places.error} retry={places.retry} select={inspectPlace} selected={activePlace} clear={() => setActivePlace(undefined)} add={addPlace} create={place => openForm('activity', undefined, undefined, place)} share={setSharedPlace} /> : view === 'routes' ? <><div className="panel-intro"><h1>Planifică un traseu</h1><p>Alege modul de transport, o destinație și opriri opționale.</p></div><div className="route-planner">
+            {view === 'layers' && !activePlace ? <>{inspection && <div className="infrastructure-inspection"><button className="icon-btn" aria-label="Închide informația despre strat" onClick={() => setInspection(undefined)}><X size={16} /></button><strong>{inspection.title}</strong><p>{inspection.description}</p></div>}<MapLayersPanel tramRefs={tramRefs} live={<StptLivePanel enabled={liveEnabled} toggle={() => setLiveEnabled(enabled => !enabled)} kind={liveType} setKind={type => { setLiveType(type); setLiveLine(''); }} line={liveLine} setLine={setLiveLine} status={liveStatus} count={liveVehicles.length} />} visibility={visibility} toggle={toggleLayer} layers={{ cycleways, tramways, busways, sidewalks, places }} buildings={buildings} setBuildings={setBuildings} /></> : (view === 'places' || (view === 'layers' && activePlace)) ? <PlacesPanel places={places.data ? (view === 'places' ? filteredPlaces : allMapPlaces) : undefined} detailsInLayers={view === 'layers'} query={query} category={placeCategory} setCategory={setPlaceCategory} error={places.error} retry={places.retry} select={inspectPlace} selected={activePlace} clear={() => setActivePlace(undefined)} add={addPlace} create={place => openForm('activity', undefined, undefined, place)} share={setSharedPlace} /> : view === 'routes' ? <><div className="panel-intro"><h1>Planifică un traseu</h1><p>Alege modul de transport, o destinație și opriri opționale.</p></div><div className="route-planner">
             <div className="travel-mode-picker" role="group" aria-label="Mod de transport">{(['walking', 'cycling', 'driving', 'transit'] as const).map(mode => <button key={mode} className={travelMode === mode ? 'active' : ''} aria-pressed={travelMode === mode} onClick={() => { if (mode !== travelMode) { setTravelMode(mode); invalidateRoute(); } }}>{mode === 'walking' ? <Footprints size={18} /> : mode === 'cycling' ? <Bike size={18} /> : mode === 'driving' ? <Car size={18} /> : <TrainFront size={18} />}<span>{mode === 'transit' ? 'Transport public' : travelModes[mode].label}</span></button>)}</div>
             <div className="route-notice"><Route size={18} />{travelMode === 'transit' ? <p><strong>Traseu cu transportul public</strong><br />Calcul pe rețeaua STPT, cu deplasare pe jos între stații când este necesar.</p> : <p><strong>Traseu {travelMode === 'walking' ? 'pietonal' : travelMode === 'cycling' ? 'pentru bicicletă' : 'auto'}</strong><br />Calcul pe rețeaua {travelMode === 'walking' ? 'pietonală' : travelMode === 'cycling' ? 'accesibilă bicicletelor' : 'rutieră auto'}, cu profil OSRM dedicat.</p>}</div>
             <label className="field-label">PUNCT DE PORNIRE</label><div className="route-start"><span className="start-dot" /><div><strong>{start.lon === center.lon && start.lat === center.lat ? 'Centrul Timișoarei' : 'Punctul ales'}</strong><small>{start.lat.toFixed(5)}, {start.lon.toFixed(5)}</small></div></div>
@@ -460,14 +499,21 @@ export default function App({ cloud }: { cloud?: Cloud }) {
             {view !== 'saved' && <>
               <div className="filter-tabs" role="group" aria-label="Tipuri de anunț afișate">{(['report', 'activity', 'discussion'] as const).map(type => <button key={type} className={community[type] ? `active ${type}` : type} aria-pressed={community[type]} onClick={() => chooseCommunity(type)}>{iconFor(type, 14)}{meta[type].plural}</button>)}</div>
             </>}
-            <div className="results-heading"><span className="results-count">{pins.length} {view === 'saved' ? 'salvate' : 'Anunțuri'}</span>
+            <div className="results-heading"><span className="results-count">{communityResults.length} {view === 'saved' ? 'salvate' : 'Anunțuri'}</span>
               <details className="list-options">
                 <summary><ArrowDownUp size={14} />Filtre</summary>
                 <div className="list-options-body"><label className="checkbox-line"><input type="checkbox" checked={pinLabels} onChange={e => setPinLabels(e.target.checked)} />Arată numele pe hartă</label><label>Ordine<select value={sort} onChange={event => setSort(event.target.value === 'near' ? 'near' : 'recent')}><option value="recent">Cele mai recente</option><option value="near">{locationPoint ? 'Aproape de mine' : 'Aproape de centru'}</option></select></label>
-                {view === 'explore' && community.activity && <label className="checkbox-line"><input type="checkbox" checked={includePast} onChange={e => setIncludePast(e.target.checked)} />Include activități încheiate sau anulate</label>}</div>
+                {view === 'explore' && <label className="checkbox-line"><input type="checkbox" role="switch" checked={municipalEnabled} onChange={event => setMunicipalEnabled(event.target.checked)} />Include sesizările Primăriei</label>}{view === 'explore' && community.activity && <label className="checkbox-line"><input type="checkbox" checked={includePast} onChange={e => setIncludePast(e.target.checked)} />Include activități încheiate sau anulate</label>}</div>
               </details>
             </div>
-            <div className="pin-list">{pins.map(pin => <PinCard key={pin.id} pin={pin} person={profiles.find(p => p.id === pin.authorId) ?? guest} userId={user.id} busy={busy} selected={selectedId === pin.id} select={() => select(pin.id)} saved={savedIds.includes(pin.id)} save={() => perform({ type: 'save', pinId: pin.id, userId: user.id, enabled: !savedIds.includes(pin.id) })} confirm={enabled => perform({ type: 'support', pinId: pin.id, userId: user.id, enabled })} messages={state.messages.filter(m => m.pinId === pin.id).length} openChat={trigger => openChat(pin.id, trigger)} chatOpen={chatId === pin.id} />)}{pins.length === 0 && <div className="empty-state"><Sprout size={30} />
+            {municipalVisible && municipalReports.error && <div className="form-error" role="status">Sesizările Primăriei nu s-au putut actualiza. <button type="button" onClick={municipalReports.retry}>Reîncearcă</button></div>}<div className="pin-list">{communityResults.slice(0, visibleCount).map(result => {
+              if (result.kind === 'municipal') {
+                const id = municipalReportId(result.report.number);
+                return <MunicipalCard key={id} report={result.report} select={() => select(id)} />;
+              }
+              const { pin } = result;
+              return <PinCard key={pin.id} pin={pin} person={profiles.find(p => p.id === pin.authorId) ?? guest} userId={user.id} busy={busy} selected={selectedId === pin.id} select={() => select(pin.id)} saved={savedIds.includes(pin.id)} save={() => perform({ type: 'save', pinId: pin.id, userId: user.id, enabled: !savedIds.includes(pin.id) })} confirm={enabled => perform({ type: 'support', pinId: pin.id, userId: user.id, enabled })} messages={state.messages.filter(m => m.pinId === pin.id).length} openChat={trigger => openChat(pin.id, trigger)} chatOpen={chatId === pin.id} />;
+            })}{communityResults.length > visibleCount && <button type="button" className="secondary community-more" onClick={() => setVisibleCount(count => count + 30)}>Vezi mai multe anunțuri</button>}{communityResults.length === 0 && <div className="empty-state"><Sprout size={30} />
               <h3>{view === 'saved' ? 'Niciun pin salvat' : allPins.length ? 'Niciun pin găsit' : 'Comunitatea începe cu primul pin'}</h3>
               {view === 'saved'
                 ? <button className="secondary" onClick={() => switchView('explore')}>Explorează comunitatea</button>
@@ -485,7 +531,7 @@ export default function App({ cloud }: { cloud?: Cloud }) {
           <Suspense fallback={<div className="map-surface"><div className="map-loading" role="status">Se încarcă harta…</div></div>}>
             <MapView theme={theme} tab={view} browsePlaces={view === 'places' ? filteredPlaces : allMapPlaces} placeCatalog={placeCatalog}
               liveVehicles={view === 'layers' && !picking ? liveVehicles : []}
-              municipalReports={municipalVisible ? municipalReports.reports : undefined}
+              municipalReports={municipalVisible ? officialReports : undefined} selectedMunicipal={selectedMunicipal} onSelectMunicipal={number => select(municipalReportId(number))}
               routePoints={view === 'routes' && !picking ? [{ location: start, title: 'Punct de pornire' }, ...routeWaypoints, ...(routeDestination ? [{ ...routeDestination, destination: true }] : [])] : []}
               pins={mapPins} selected={selected} onSelect={select} picking={!!picking} onPick={pickMapPoint}
               picked={picking === 'form' || (form && formMinimized) ? formLocation : undefined} userLocation={locationPoint}
@@ -538,6 +584,14 @@ function Detail({ pin, state, profiles, canShare, userId, busy, close, act, edit
         {menu && <div className="detail-menu">{mine && <><button onClick={() => { edit(); setMenu(false); }}><Settings2 size={15} />Editează</button><button className="danger" disabled={busy} onClick={() => { if (confirm('Retragi acest pin? Nu va mai fi afișat, iar conversația va fi eliminată.')) { void act({ type: 'delete', pinId: pin.id, userId }, 'Pinul a fost retras.').then(close).catch(() => {}); } }}><Trash2 size={15} />Retrage pinul</button></>}<button onClick={() => { const reason = prompt('De ce raportezi acest conținut?'); if (reason) { run({ type: 'flag', pinId: pin.id, userId, reason }, state.people ? 'Raportarea a fost înregistrată.' : 'Raportarea a fost înregistrată în acest browser.'); setMenu(false); } }}><Flag size={15} />Raportează conținutul</button></div>}
         {pin.type === 'activity' && <div className="activity-facts"><div><CalendarDays size={19} /><span><strong>{dateLabel(pin.startsAt!)}</strong><small>Până la {dateLabel(pin.endsAt!)} · ora României</small></span></div><div><Users size={19} /><span><strong>{pin.participants.length}{pin.capacity ? ` din ${pin.capacity} locuri ocupate` : ' participanți'}</strong><small>Organizatorul este inclus</small></span></div></div>}
         {pin.relatedId && <button className="related-pin" onClick={() => openRelated(pin.relatedId!)}><TriangleAlert size={16} /><span>Vezi sesizarea de la care a pornit</span><ChevronRight size={16} /></button>}
+        {pin.type === 'report' && <div className="municipal-report-actions">
+          <a className="action-link" href={municipalReportsPortal + '/#adauga'} target="_blank" rel="noreferrer"><ExternalLink size={16} />Deschide portalul de sesizări al Primăriei</a>
+          <label className="checkbox-line">
+            <input type="checkbox" role="switch" checked={!!pin.reportedToMunicipality} disabled={!mine || busy}
+              onChange={event => run({ type: 'setMunicipalReported', pinId: pin.id, userId, enabled: event.target.checked })} />
+            Raportată la Primărie
+          </label>
+        </div>}
         {pin.type === 'report' && <>{!mine && pin.status !== 'resolved' ? <button className={`primary full support-button ${pin.supports.includes(userId) ? 'supported' : ''}`} aria-pressed={pin.supports.includes(userId)} disabled={busy} onClick={() => run({ type: 'support', pinId: pin.id, userId, enabled: !pin.supports.includes(userId) })}><ThumbsUp size={18} />{pin.supports.includes(userId) ? 'Retrage confirmarea' : 'Confirm și eu'}<span>{pin.supports.length}</span></button> : <p className="support-count"><ThumbsUp size={16} />Confirmări: {pin.supports.length}</p>}{mine && <button className="secondary full" disabled={busy} onClick={() => run({ type: 'resolve', pinId: pin.id, userId }, pin.status === 'resolved' ? 'Sesizarea a fost redeschisă.' : 'Ai marcat sesizarea ca rezolvată.')}><CheckCheck size={17} />{pin.status === 'resolved' ? 'Redeschide sesizarea' : 'Marchează ca rezolvată'}</button>}{pin.changedAt && <small className="muted-text">Stare actualizată de {author.name}, {dateLabel(pin.changedAt)}.</small>}<button className="action-link" onClick={createActivity}><Sprout size={17} />Organizează o acțiune aici <ArrowRight size={16} /></button></>}
         {pin.type === 'activity' && <>{!mine && <button className="primary full" disabled={busy || pin.status === 'cancelled' || Date.parse(pin.startsAt!) <= Date.now() || (status === 'Completă' && !pin.participants.includes(userId))} onClick={() => run({ type: 'join', pinId: pin.id, userId, enabled: !pin.participants.includes(userId) }, pin.participants.includes(userId) ? 'Te-ai retras din activitate.' : 'Ești înscris! Ne vedem acolo.')}><Users size={18} />{pin.participants.includes(userId) ? 'Retrage participarea' : status === 'Completă' ? 'Toate locurile sunt ocupate' : status === 'Urmează' ? 'Particip și eu' : 'Înscrieri închise'}</button>}{mine && <div className="organizer-note"><CheckCheck size={17} />Ești organizator și participant.{pin.status !== 'cancelled' && <button className="action-link danger" disabled={busy} onClick={() => { if (confirm('Anulezi activitatea? Participanții vor vedea starea „Anulată”.')) run({ type: 'cancel', pinId: pin.id, userId }, 'Activitatea a fost anulată.'); }}>Anulează activitatea</button>}</div>}</>}
         <button className="secondary full" aria-expanded={chatOpen} onClick={event => openChat(event.currentTarget)}><MessageCircle size={17} />Deschide chat</button>

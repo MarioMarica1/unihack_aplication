@@ -294,18 +294,33 @@ function stripTravelSuffix(text: string): string {
 
 function cleanStopName(raw: string): string {
   return raw
+    .replace(/^(?:[,;->\s]+)+/, '')
     .replace(/^(?:până\s+|pana\s+)?(?:la|spre|către|catre|pe\s+la|prin|in|în|to|at)\s+/i, '')
+    .replace(/[,;]+$/g, '')
     .trim();
 }
 
-function extractStopsFromChain(rawChain: string): { waypointRaws: string[]; destinationRaw?: string } {
+const SEQUENTIAL_CONNECTOR_TEST =
+  /(?:,|;|->|\b(?:(?:și|si)\s+)?(?:apoi|dup[ăa](?:ia|-?aia)?(?:\s+(?:aceea|aia|asta|care|ce))?|pe\s+urm[ăa]|(?:and\s+)?then|after\s+that)\b|\b(?:și|si)(?=\s+(?:(?:până|pana)\s+)?(?:la|spre|către|catre|pe\s+la|în|in)\s))/i;
+
+const SEQUENTIAL_CONNECTOR_SPLIT =
+  /(?:\s*(?:,|;|->)\s*|\s+)\b(?:(?:și|si)\s+)?(?:apoi|dup[ăa](?:ia|-?aia)?(?:\s+(?:aceea|aia|asta|care))?|pe\s+urm[ăa]|(?:and\s+)?then|after\s+that|cu\s+oprire\s+(?:la|în|in|prin)|via|prin|și(?=\s+(?:(?:până|pana)\s+)?(?:la|spre|către|catre|pe\s+la|în|in)\s)|si(?=\s+(?:(?:până|pana)\s+)?(?:la|spre|către|catre|pe\s+la|în|in)\s))\b\s+|\s*(?:,|;|->)\s*/i;
+
+function splitPrepositionChain(part: string): string[] {
+  return part
+    .split(/\s+(?:până\s+la|pana\s+la|pe\s+la|spre|către|catre|la|to)\s+/i)
+    .map(cleanStopName)
+    .filter(Boolean);
+}
+
+function extractStopsFromChain(
+  rawChain: string,
+  options?: { allowImplicitLaSplit?: boolean },
+): { waypointRaws: string[]; destinationRaw?: string } {
   const withoutMode = stripTravelSuffix(rawChain);
   if (!withoutMode) return { waypointRaws: [] };
 
-  const hasSequentialConnector =
-    /(?:,\s*|(?:și|si)\s+apoi|(?:și|si)\s+dup[ăa]\s+(?:aceea|aia|care)|(?:și|si)\s+pe\s+urm[ăa]|apoi|dup[ăa]\s+(?:aceea|aia|care)|pe\s+urm[ăa]|and\s+then|then|after\s+that)\s+/i.test(
-      withoutMode,
-    );
+  const hasSequentialConnector = SEQUENTIAL_CONNECTOR_TEST.test(withoutMode);
 
   // "destinatie cu oprire la waypoint" / "destinatie via waypoint"
   const viaMatch = !hasSequentialConnector
@@ -323,13 +338,17 @@ function extractStopsFromChain(rawChain: string): { waypointRaws: string[]; dest
     };
   }
 
-  // Chronological multi-stop sequence: "la gara si apoi la mall" -> waypoints: ["gara"], destination: "mall"
-  const parts = withoutMode
-    .split(
-      /\s*(?:,\s*|(?:și|si)\s+apoi|(?:și|si)\s+dup[ăa]\s+(?:aceea|aia|care)|(?:și|si)\s+pe\s+urm[ăa]|apoi|dup[ăa]\s+(?:aceea|aia|care)|pe\s+urm[ăa]|and\s+then|then|after\s+that|cu\s+oprire\s+(?:la|în|in|prin)|via|prin)\s+/i,
-    )
+  // Chronological multi-stop sequence: "la gara si apoi la mall", "iulius mall dupa la upt" -> waypoints + final destination
+  let parts = withoutMode
+    .split(SEQUENTIAL_CONNECTOR_SPLIT)
     .map(cleanStopName)
     .filter(Boolean);
+
+  // If origin used "pe la / prin / via" (e.g. "de la aeroport prin piata unirii la bastion"),
+  // split remaining "W la D" prepositions cleanly.
+  if (options?.allowImplicitLaSplit) {
+    parts = parts.flatMap(splitPrepositionChain);
+  }
 
   if (parts.length <= 1) {
     return { waypointRaws: [], destinationRaw: parts[0] };
@@ -350,12 +369,14 @@ export function parseNavigationIntent(query: string): {
   const trimmed = query.trim();
   const mode = inferTravelMode(trimmed);
 
-  // Pattern: "de la X la Y (și apoi la Z)" / "from X to Y (then Z)"
+  // Pattern: "de la X la Y (și apoi / după la Z)", "de la X prin W la Y", "from X to Y (then Z)"
   const fromToMatch = trimmed.match(
-    /(?:de la|din|from)\s+(.+?)\s+(?:la|spre|către|catre|până la|pana la|to)\s+(.+)$/i,
+    /(?:de la|din|from)\s+(.+?)\s+(până\s+la|pana\s+la|pe\s+la|prin|via|la|spre|către|catre|to|->)\s+(.+)$/i,
   );
   if (fromToMatch) {
-    const stops = extractStopsFromChain(fromToMatch[2]);
+    const connector = fromToMatch[2].toLowerCase();
+    const isViaConnector = /^(?:pe\s+la|prin|via)$/i.test(connector);
+    const stops = extractStopsFromChain(fromToMatch[3], { allowImplicitLaSplit: isViaConnector });
     if (stops.destinationRaw) {
       return {
         isNavigation: true,
@@ -367,10 +388,10 @@ export function parseNavigationIntent(query: string): {
     }
   }
 
-  // Pattern: "Take me to X", "Vreau să merg la X și apoi la Y", "Du-mă la X", "Rută spre X", etc.
+  // Pattern: "Take me to X", "Vreau să merg la X și apoi la Y", "Du-mă / Duma la X", "Rută spre X", etc.
   const navPatterns = [
     /(?:take me to|how do i get to|how to get to|navigate to|route to|directions to|go to)\s+(.+)/i,
-    /(?:fă-mi o rută|fa-mi o ruta|planifică(?:\s+o)?\s+rută|planifica(?:\s+o)?\s+ruta|calculează(?:\s+o)?\s+rută|calculeaza(?:\s+o)?\s+ruta|vreau să merg|vreau sa merg|vreau să ajung|vreau sa ajung|vreau la|cum ajung|cum pot ajunge|cum merg|du-mă|du-ma|navighează|navigheaza|rută|ruta|traseu|mergi)\s+(?:(?:până\s+|pana\s+)?(?:la|spre|către|catre|pe\s+la|în|in)\s+)?(.+)/i,
+    /(?:fă-mi o rută|fa-mi o ruta|planifică(?:\s+o)?\s+rută|planifica(?:\s+o)?\s+ruta|calculează(?:\s+o)?\s+rută|calculeaza(?:\s+o)?\s+ruta|vreau să merg|vreau sa merg|vreau să ajung|vreau sa ajung|vreau la|cum ajung|cum pot ajunge|cum merg|du-?m[ăa]|du\s+m[ăa]|mă\s+duci|ma\s+duci|navighează|navigheaza|rut[ăa]|traseu|mergi)\s+(?:(?:până\s+|pana\s+)?(?:la|spre|către|catre|pe\s+la|în|in)\s+)?(.+)/i,
   ];
 
   for (const regex of navPatterns) {
@@ -559,7 +580,7 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
     if (selectedPin) {
       return `Postare selectată: ${selectedPin.title}`;
     }
-    if (selectedTransportLine) {
+    if (activeModule === 'transport' && selectedTransportLine) {
       return `Linia STPT ${selectedTransportLine} (${selectedTransportDirection.toUpperCase()})`;
     }
     if (mapViewport) {

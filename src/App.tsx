@@ -404,6 +404,8 @@ export default function App({
     setSelectedPinId('');
     setSelectedMunicipalNumber('');
     setSelectedVehicleId('');
+    setSelectedTransportLine('');
+    setShowAllTransportRoutes(false);
     setSelectedVeloStation(null);
     setSelectedCityEvent(null);
     setSelectedPlace(null);

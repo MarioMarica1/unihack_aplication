@@ -22,6 +22,7 @@ import {
 } from './mobility-map';
 import type { ActiveLineRoute, NetworkSubFilters } from './mobility-map';
 import type { LiveVehicle } from './stpt-live';
+import type { MapViewportState } from './AiUrbanAssistant';
 import { clearTransitRoute, drawTransitRoute } from './transit-map';
 import type { TransitOption } from './transitRouter';
 import { municipalFeatureAt, openMunicipalFeature, showMunicipalReports } from './municipal-reports-map';
@@ -69,6 +70,7 @@ type Props = {
   focusedPlace?: MapPlace;
   onInspectPlace: (place: MapPlace) => void;
   onInspectLine: (info: { title: string; description: string }) => void;
+  onViewportChange?: (viewport: MapViewportState) => void;
 };
 
 const icons = {
@@ -108,12 +110,17 @@ function syncSatelliteLayer(map: maplibregl.Map, enabled: boolean) {
         type: 'raster',
         source: satelliteSourceId,
         layout: { visibility: enabled ? 'visible' : 'none' },
-        paint: { 'raster-opacity': 0.98 },
+        paint: {
+          'raster-opacity': enabled ? 0.98 : 0,
+          'raster-fade-duration': 320,
+          'raster-opacity-transition': { duration: 320, delay: 0 },
+        },
       },
       firstRoadOrLabel,
     );
   } else {
     map.setLayoutProperty(satelliteLayerId, 'visibility', enabled ? 'visible' : 'none');
+    map.setPaintProperty(satelliteLayerId, 'raster-opacity', enabled ? 0.98 : 0);
   }
 }
 
@@ -201,10 +208,27 @@ export default function MapCanvas(props: Props) {
     map.current = instance;
     instance.addControl(new maplibregl.AttributionControl({ compact: false }), 'bottom-left');
     instance.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
+    const emitViewport = () => {
+      if (!latest.current.onViewportChange) return;
+      const c = instance.getCenter();
+      const b = instance.getBounds();
+      latest.current.onViewportChange({
+        center: { lon: c.lng, lat: c.lat },
+        bounds: {
+          west: b.getWest(),
+          south: b.getSouth(),
+          east: b.getEast(),
+          north: b.getNorth(),
+        },
+        zoom: instance.getZoom(),
+      });
+    };
     instance.on('load', () => {
       setReady(value => value + 1);
       setError(false);
+      emitViewport();
     });
+    instance.on('moveend', emitViewport);
     instance.on('style.load', () => {
       styleReady.current = true;
       baseLayers(instance, latest.current);

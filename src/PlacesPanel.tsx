@@ -14,6 +14,7 @@ import {
   Share2,
   X,
 } from 'lucide-react';
+import { SkeletonCards } from './SkeletonCards';
 import { useState } from 'react';
 import { placeKindLabel, toMapPlace } from './infrastructure';
 import type { Infrastructure, MapPlace } from './infrastructure';
@@ -182,6 +183,7 @@ export default function PlacesPanel({
       <div className="panel-intro">
         <h1>Ghid Urban & Instituții</h1>
         <p role="status">Se încarcă catalogul de locuri și instituții din Timișoara…</p>
+        <SkeletonCards count={4} />
       </div>
     );
   }

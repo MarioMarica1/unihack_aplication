@@ -2991,3 +2991,365 @@ html[data-theme='dark'] .ai-composer input {
     background: #94a3b8;
   }
 }
+
+
+/* === 2026 SPATIAL UI, GLASSMORPHISM & HARDWARE-ACCELERATED 60/120FPS MOTION === */
+:root {
+  --ease-spatial: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --glass-shadow: 0 8px 32px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --glass-bg: rgba(255, 255, 255, 0.84);
+  --glass-bg-strong: rgba(255, 255, 255, 0.92);
+  --glass-border: rgba(255, 255, 255, 0.78);
+}
+
+/* Micro-interaction press scale (GPU-only transform + opacity) */
+.app-shell button:not(:disabled):not(.maplibregl-marker):not(.map-label-pin):not(.velo-map-marker):not(.city-event-map-pin) {
+  transition: transform 0.16s var(--ease-spatial), opacity 0.16s ease, box-shadow 0.2s var(--ease-spatial);
+}
+.app-shell button:not(:disabled):not(.maplibregl-marker):not(.map-label-pin):not(.velo-map-marker):not(.city-event-map-pin):active {
+  transform: scale(0.96);
+}
+
+/* Hardware-accelerated panel & modal entrance keyframes (transform + opacity only) */
+@keyframes spatial-slide-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-14px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.app-shell .detail-panel,
+.app-shell .pin-chat,
+.app-shell .modal {
+  animation: spatial-slide-in 0.26s var(--ease-spatial);
+  will-change: transform, opacity;
+}
+
+/* 120fps GPU Skeleton Loading Shimmer (translate3d + opacity only, zero layout thrash) */
+@keyframes skeleton-shimmer {
+  0% {
+    transform: translate3d(-100%, 0, 0);
+  }
+  100% {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+.skeleton-stack {
+  display: grid;
+  gap: 10px;
+  padding: 6px 18px 14px;
+}
+.skeleton-card {
+  position: relative;
+  overflow: hidden;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border-neutral);
+  background: rgba(248, 250, 252, 0.88);
+  display: grid;
+  gap: 9px;
+}
+.skeleton-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.65) 50%, transparent 100%);
+  animation: skeleton-shimmer 1.35s var(--ease-spatial) infinite;
+  will-change: transform;
+  pointer-events: none;
+}
+.skeleton-line {
+  height: 11px;
+  border-radius: 999px;
+  background: rgba(203, 213, 225, 0.55);
+}
+.skeleton-line.w-sm { width: 38%; }
+.skeleton-line.w-md { width: 68%; }
+.skeleton-line.w-lg { width: 92%; height: 14px; }
+
+@media (min-width: 761px) {
+  .app-shell.map-first {
+    position: relative;
+    overflow: hidden;
+  }
+  .app-shell.map-first .workspace,
+  .app-shell.map-first .main-layout {
+    position: relative;
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+  }
+  .app-shell.map-first .map-area {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+  }
+
+  /* Centralized Floating Pill Omnibar (Top Bar) — Urban Conect logo proportions preserved */
+  .app-shell.map-first .app-header {
+    position: absolute;
+    top: 14px;
+    left: 16px;
+    right: 16px;
+    height: 62px;
+    flex: none;
+    padding: 0 12px 0 8px;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(175%);
+    -webkit-backdrop-filter: blur(20px) saturate(175%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    z-index: 30;
+  }
+  .app-shell.map-first .header-identity {
+    flex: 0 0 auto;
+    padding: 0 12px 0 8px;
+  }
+  .app-shell.map-first .global-search-container {
+    max-width: 560px;
+    margin: 0 auto;
+  }
+  .app-shell.map-first .global-search {
+    height: 44px;
+    border-radius: 999px;
+    background: rgba(241, 245, 249, 0.8);
+    border: 1px solid rgba(203, 213, 225, 0.65);
+  }
+  .app-shell.map-first .omni-search-dropdown {
+    border-radius: 22px;
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    box-shadow: var(--glass-shadow);
+  }
+  .app-shell.map-first .header-create {
+    border-radius: 999px;
+    padding: 0 16px;
+  }
+
+  /* Theme Toggle & AI Urban Assistant anchored right next to each other */
+  .app-shell.map-first .theme-toggle {
+    top: calc(100% + 12px);
+    right: 0;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+  .app-shell.map-first .ai-assistant-toggle {
+    top: calc(100% + 12px);
+    right: 52px;
+    border-radius: 999px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    border: 1px solid rgba(15, 82, 186, 0.25);
+    box-shadow: var(--glass-shadow);
+  }
+  .app-shell.map-first .ai-assistant-panel {
+    top: calc(100% + 64px);
+    right: 0;
+    border-radius: 24px;
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    box-shadow: 0 14px 40px rgba(15, 23, 42, 0.16);
+    animation: none;
+  }
+
+  /* Floating Glassmorphism Discovery Panel */
+  .app-shell.map-first .discovery {
+    position: absolute;
+    top: 88px;
+    left: 16px;
+    bottom: 16px;
+    width: var(--sidebar-width);
+    flex: none;
+    border-radius: 24px;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(175%);
+    -webkit-backdrop-filter: blur(20px) saturate(175%);
+    box-shadow: var(--glass-shadow);
+    z-index: 15;
+    overflow: hidden;
+  }
+  .app-shell.map-first .sidebar-tabs,
+  .app-shell.map-first .sidebar-bottom {
+    background: rgba(255, 255, 255, 0.56);
+  }
+  .app-shell.map-first .detail-panel {
+    position: absolute;
+    inset: 0;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    border: 0;
+    border-radius: 24px;
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(20px) saturate(175%);
+    -webkit-backdrop-filter: blur(20px) saturate(175%);
+    z-index: 22;
+  }
+
+  /* Floating Pin Chat Panel */
+  .app-shell.map-first .pin-chat {
+    position: absolute;
+    top: 88px;
+    left: calc(var(--sidebar-width) + 28px);
+    bottom: 16px;
+    width: min(440px, calc(100vw - var(--sidebar-width) - 48px));
+    border-radius: 24px;
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(20px) saturate(175%);
+    -webkit-backdrop-filter: blur(20px) saturate(175%);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 12px 36px rgba(15, 23, 42, 0.14);
+    z-index: 18;
+  }
+  .app-shell.map-first .pin-chat.expanded {
+    right: 16px;
+    width: auto;
+    max-width: none;
+  }
+  .app-shell.map-first .pin-chat.expanded + .map-area {
+    visibility: visible;
+  }
+
+  /* Keep Map Context Pill & Map Controls clear of the floating cards */
+  .app-shell.map-first .map-context-pill {
+    top: 88px;
+    left: calc(var(--sidebar-width) + 30px);
+    border-radius: 999px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(165%);
+    -webkit-backdrop-filter: blur(20px) saturate(165%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+  .app-shell.map-first .maplibregl-ctrl-bottom-left {
+    left: calc(var(--sidebar-width) + 28px);
+    bottom: 12px;
+  }
+  .app-shell.map-first .maplibregl-ctrl-bottom-right {
+    right: 16px;
+    bottom: 16px;
+  }
+  .app-shell.map-first .map-utility-controls {
+    right: 16px;
+    bottom: 118px;
+  }
+  .app-shell.map-first .map-utility-controls > button {
+    border-radius: 999px;
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(16px);
+    box-shadow: var(--glass-shadow);
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell.map-first .app-header {
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    box-shadow: var(--glass-shadow);
+  }
+  .app-shell.map-first .global-search {
+    border-radius: 999px;
+  }
+  .app-shell.map-first .discovery {
+    border-radius: 24px 24px 0 0;
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(20px) saturate(175%);
+    -webkit-backdrop-filter: blur(20px) saturate(175%);
+    box-shadow: 0 -8px 32px rgba(15, 23, 42, 0.14);
+    transition: max-height 0.34s var(--ease-spatial), transform 0.34s var(--ease-spatial), opacity 0.25s ease;
+  }
+  .app-shell.panel-open.sheet-snap-peek .discovery {
+    max-height: 30dvh;
+  }
+  .app-shell.panel-open.sheet-snap-half .discovery {
+    max-height: 54dvh;
+  }
+  .app-shell.panel-open.sheet-snap-full .discovery {
+    max-height: 90dvh;
+  }
+  .sheet-grabber {
+    touch-action: none;
+    user-select: none;
+  }
+  .app-shell.map-first .ai-assistant-panel {
+    border-radius: 24px 24px 0 0;
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+}
+
+.report-relational-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+@media (max-width: 520px) {
+  .report-relational-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.report-relational-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  padding: 11px 13px;
+  border-radius: 14px;
+  border: 1px solid var(--border-neutral);
+  background: var(--surface-subtle);
+  text-align: left;
+  color: var(--ink-strong);
+  transition: transform 0.16s var(--ease-spatial), border-color 0.16s ease, background 0.16s ease;
+}
+.report-relational-pill:hover {
+  border-color: var(--brand-blue);
+  background: var(--brand-soft);
+}
+.report-relational-pill.selected {
+  border-color: var(--brand-blue);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 2px rgba(15, 82, 186, 0.16);
+}
+.report-relational-pill strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: inherit;
+}
+.report-relational-pill small {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+.report-selected-relation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 13px;
+  border-radius: 12px;
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-border);
+  font-size: 12.5px;
+  color: var(--ink-strong);
+}

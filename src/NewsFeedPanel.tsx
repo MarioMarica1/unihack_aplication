@@ -17,6 +17,7 @@ import type { Pin } from './domain';
 import type { MunicipalReport } from './municipal-reports';
 import { municipalReportUrl, municipalStatuses } from './municipal-reports';
 import type { LiveAlert } from './stpt-live';
+import { SkeletonCards } from './SkeletonCards';
 
 export type TemporalWindow = 'daily' | 'weekly' | 'monthly';
 
@@ -33,6 +34,7 @@ type Props = {
   onSelectMunicipal: (number: string) => void;
   onSelectPin: (id: string) => void;
   onOpenTransport: () => void;
+  loading?: boolean;
 };
 
 const temporalLimitsMs: Record<TemporalWindow, number> = {
@@ -60,6 +62,7 @@ export function NewsFeedPanel({
   onSelectMunicipal,
   onSelectPin,
   onOpenTransport,
+  loading = false,
 }: Props) {
   const [categoryFilter, setCategoryFilter] = useState<NewsCategory>('all');
   const [query, setQuery] = useState('');
@@ -345,7 +348,9 @@ export function NewsFeedPanel({
           );
         })}
 
-        {feedItems.length === 0 && (
+        {loading && feedItems.length === 0 && <SkeletonCards count={4} />}
+
+        {!loading && feedItems.length === 0 && (
           <div className="empty-state">
             <Newspaper size={28} />
             <h3>Nicio alertă în intervalul selectat</h3>

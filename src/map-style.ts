@@ -36,6 +36,25 @@ export function applyBaseStyle(
       if (/^railway/.test(id)) map.setPaintProperty(id, 'line-color', id.includes('dashline') ? '#2b3848' : '#46566a');
       if (id.startsWith('aeroway-') && layer.type === 'line') map.setPaintProperty(id, 'line-color', id.includes('casing') ? '#1f2835' : '#526478');
       if (id === 'aeroway-area' && layer.type === 'fill') map.setPaintProperty(id, 'fill-color', '#38414e');
+    } else {
+      const id = layer.id;
+      if (layer.type === 'background') map.setPaintProperty(id, 'background-color', '#f4f6f9');
+      if (id === 'water' || id === 'waterway' || id === 'water_name') {
+        if (layer.type === 'fill') map.setPaintProperty(id, 'fill-color', '#dbe7f3');
+        if (layer.type === 'line') map.setPaintProperty(id, 'line-color', '#cbdcec');
+        if (layer.type === 'symbol') { map.setPaintProperty(id, 'text-color', '#64748b'); map.setPaintProperty(id, 'text-halo-color', '#f8fafc'); }
+      }
+      if (id === 'landcover_wood' || id === 'landuse_park' || /landcover_(grass|forest)/.test(id)) {
+        if (layer.type === 'fill') { map.setPaintProperty(id, 'fill-color', '#e4ece6'); map.setPaintProperty(id, 'fill-opacity', 0.8); }
+      }
+      if (/^landuse_/.test(id) && id !== 'landuse_park' && layer.type === 'fill') {
+        map.setPaintProperty(id, 'fill-color', '#edf1f5');
+      }
+      if (id === 'highway_minor' || id === 'highway_path') map.setPaintProperty(id, 'line-color', '#ffffff');
+      if (id === 'highway_major_casing' || id === 'highway_motorway_casing') map.setPaintProperty(id, 'line-color', '#cbd5e1');
+      if (id === 'highway_major_inner' || id === 'highway_major_subtle') map.setPaintProperty(id, 'line-color', '#e2e8f0');
+      if (id === 'highway_motorway_inner' || id === 'highway_motorway_subtle') map.setPaintProperty(id, 'line-color', '#d6dfe9');
+      if (/^railway/.test(id) && layer.type === 'line') map.setPaintProperty(id, 'line-color', id.includes('dashline') ? '#e2e8f0' : '#cbd5e1');
     }
     if (/building|housenumber/.test(layer.id) || ('source-layer' in layer && ['building', 'housenumber'].includes(layer['source-layer'] ?? ''))) {
       const showLayer = options.buildings && (layer.type !== 'fill-extrusion' || Boolean(options.buildings3d));
@@ -43,13 +62,13 @@ export function applyBaseStyle(
       if (layer.type === 'fill') {
         // Liberty's building fill stops at z14; extending it is required when 3D is disabled.
         map.setLayerZoomRange(layer.id, 13, 24);
-        map.setPaintProperty(layer.id, 'fill-color', options.dark ? '#2b3646' : '#e8ded2');
-        map.setPaintProperty(layer.id, 'fill-outline-color', options.dark ? '#202936' : '#cfbfad');
+        map.setPaintProperty(layer.id, 'fill-color', options.dark ? '#2b3646' : '#e4e8ee');
+        map.setPaintProperty(layer.id, 'fill-outline-color', options.dark ? '#202936' : '#cbd5e1');
         if (options.dark) map.setPaintProperty(layer.id, 'fill-opacity', 0.72);
       } else if (layer.type === 'fill-extrusion') {
         map.setLayerZoomRange(layer.id, 13, 24);
-        map.setPaintProperty(layer.id, 'fill-extrusion-color', options.dark ? '#3b4c63' : 'hsl(35,8%,85%)');
-        map.setPaintProperty(layer.id, 'fill-extrusion-opacity', options.dark ? 0.88 : 0.82);
+        map.setPaintProperty(layer.id, 'fill-extrusion-color', options.dark ? '#3b4c63' : '#dfe5ed');
+        map.setPaintProperty(layer.id, 'fill-extrusion-opacity', options.dark ? 0.88 : 0.84);
       }
     }
     if (isBasePlaceLayer(layer)) {

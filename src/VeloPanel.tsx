@@ -11,6 +11,7 @@ import { distance } from './domain';
 import type { Point } from './domain';
 import type { LayerKey, LayerVisibility } from './infrastructure';
 import type { VeloFeedState, VeloStation } from './velo-live';
+import { SkeletonCards } from './SkeletonCards';
 
 type Props = {
   veloFeed: VeloFeedState;
@@ -198,6 +199,9 @@ export function VeloPanel({
       </div>
 
       <div className="place-results">
+        {veloFeed.status === 'loading' && filteredStations.length === 0 && (
+          <SkeletonCards count={4} />
+        )}
         {filteredStations.map(station => {
           const distMeters = userLocation
             ? Math.round(distance(userLocation, { lon: station.lon, lat: station.lat }))

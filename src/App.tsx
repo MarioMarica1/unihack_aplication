@@ -1,5 +1,6 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
   ArrowUpDown,
@@ -78,6 +79,8 @@ import { useCityEvents } from './city-events';
 import type { OfficialCityEvent } from './city-events';
 import type { ActiveLineRoute, NetworkSubFilters } from './mobility-map';
 import { AiUrbanAssistant } from './AiUrbanAssistant';
+import type { MapViewportState } from './AiUrbanAssistant';
+import { SkeletonCards } from './SkeletonCards';
 
 const MapCanvas = lazy(() => import('./MapCanvas'));
 
@@ -312,6 +315,7 @@ export default function App({
   const [mapFit, setMapFit] = useState(0);
   const [theme, setTheme] = useState<Theme>(() => readTheme());
   const [baseMapStyle, setBaseMapStyle] = useState<BaseMapStyle>('buildings3d');
+  const [mapViewport, setMapViewport] = useState<MapViewportState | undefined>();
   const [enabledPoiKinds, setEnabledPoiKinds] = useState<Record<string, boolean>>({
     health: true,
     park: true,
@@ -334,6 +338,9 @@ export default function App({
   const [placeCategory, setPlaceCategory] = useState('all');
   const [mobilePanelOpen, setMobilePanelOpen] = useState(true);
   const [mobileSheetSnap, setMobileSheetSnap] = useState<'peek' | 'half' | 'full'>('half');
+  const sheetDragStartY = useRef<number | null>(null);
+  const sheetDragged = useRef(false);
+  const [reportFormStep, setReportFormStep] = useState<1 | 2 | 3>(1);
   const [, setInfrastructureInspection] = useState<{ title: string; description: string } | null>(null);
 
   // Chat state
@@ -888,6 +895,7 @@ export default function App({
   function openCreateReport(defaultLocation = pointA.location) {
     if (!requireAuthenticatedUser()) return;
     setForm(emptyForm('report', defaultLocation));
+    setReportFormStep(1);
     setFormError('');
     setModal('create-report');
   }
@@ -954,6 +962,11 @@ export default function App({
     setModal('create-community');
   }
 
+  function openMobileSheetForSelection() {
+    setMobilePanelOpen(true);
+    setMobileSheetSnap(curr => (curr === 'peek' ? 'half' : curr));
+  }
+
   function selectPin(id: string) {
     setSelectedMunicipalNumber('');
     setSelectedVehicleId('');
@@ -961,7 +974,7 @@ export default function App({
     setSelectedCityEvent(null);
     setSelectedPlace(null);
     setSelectedPinId(id);
-    if (id) setMobilePanelOpen(true);
+    if (id) openMobileSheetForSelection();
   }
 
   function selectMunicipalReport(number: string) {
@@ -976,7 +989,7 @@ export default function App({
         switchModule('reports');
         setSelectedMunicipalNumber(number);
       }
-      setMobilePanelOpen(true);
+      openMobileSheetForSelection();
     }
   }
 
@@ -1005,7 +1018,7 @@ export default function App({
         busways: false,
       }));
     }
-    setMobilePanelOpen(true);
+    openMobileSheetForSelection();
   }
 
   function handleSelectTransportLine(line: string) {
@@ -1172,7 +1185,7 @@ export default function App({
     }
   }
 
-  function useGpsForPointA() {
+  function requestCurrentGps(onLocate: (point: Point) => void) {
     if (!navigator.geolocation) {
       setToast({ text: 'Browserul nu oferă geolocalizare.', error: true });
       return;
@@ -1181,15 +1194,30 @@ export default function App({
       pos => {
         const p = { lon: +pos.coords.longitude.toFixed(6), lat: +pos.coords.latitude.toFixed(6) };
         setUserLocation(p);
-        const nextA = { location: p, title: 'Locația curentă (GPS)' };
-        setPointA(nextA);
-        setPointAQuery(nextA.title);
-        setFocus(x => x + 1);
-        setToast({ text: 'Punctul A a fost setat la locația ta GPS.' });
+        onLocate(p);
       },
       () => setToast({ text: 'Permisiunea pentru locație a fost refuzată.', error: true }),
       { enableHighAccuracy: true, timeout: 8000 },
     );
+  }
+
+  function useGpsForPointA() {
+    requestCurrentGps(p => {
+      const nextA = { location: p, title: 'Locația curentă (GPS)' };
+      setPointA(nextA);
+      setPointAQuery(nextA.title);
+      setFocus(x => x + 1);
+      setToast({ text: 'Punctul A a fost setat la locația ta GPS.' });
+    });
+  }
+
+  function useGpsForForm() {
+    requestCurrentGps(async p => {
+      setForm(f => ({ ...f, location: p }));
+      setToast({ text: 'Coordonatele GPS ale sesizării au fost preluate.' });
+      const label = await reverseGeocode(p, new AbortController().signal);
+      if (label) setForm(f => ({ ...f, place: label }));
+    });
   }
 
   async function onMapPick(point: Point) {
@@ -1457,7 +1485,7 @@ export default function App({
             }}
           >
             <picture>
-              <source media="(max-width: 760px)" srcSet="/urban-connect-icon.webp" type="image/webp" />
+              <source media="(max-width: 760px)" srcSet="/urban-connect-icon.png" type="image/png" />
               <img
                 src={theme === 'dark' ? '/urban-connect-logo-v4-dark.png' : '/urban-connect-logo-v4.png'}
                 alt="Urban Conect"
@@ -1665,6 +1693,7 @@ export default function App({
           selectedPin={selected}
           selectedVeloStation={selectedVeloStation}
           selectedCityEvent={selectedCityEvent}
+          mapViewport={mapViewport}
           callbacks={{
             onPlanRoute: ({ origin, destination, waypoints: nextWaypoints, mode }) => {
               const targetMode = mode ?? travelMode;
@@ -1717,8 +1746,34 @@ export default function App({
               className="sheet-grabber"
               role="button"
               tabIndex={0}
-              aria-label="Ajustează înălțimea panoului mobil"
+              aria-label="Glisează sau apasă pentru a ajusta înălțimea panoului mobil"
+              onPointerDown={e => {
+                sheetDragStartY.current = e.clientY;
+                sheetDragged.current = false;
+                (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+              }}
+              onPointerMove={e => {
+                if (sheetDragStartY.current === null) return;
+                if (Math.abs(e.clientY - sheetDragStartY.current) > 18) {
+                  sheetDragged.current = true;
+                }
+              }}
+              onPointerUp={e => {
+                if (sheetDragStartY.current === null) return;
+                const dy = e.clientY - sheetDragStartY.current;
+                sheetDragStartY.current = null;
+                if (dy < -28) {
+                  setMobilePanelOpen(true);
+                  setMobileSheetSnap(curr => (curr === 'peek' ? 'half' : 'full'));
+                } else if (dy > 28) {
+                  setMobileSheetSnap(curr => (curr === 'full' ? 'half' : 'peek'));
+                }
+              }}
               onClick={() => {
+                if (sheetDragged.current) {
+                  sheetDragged.current = false;
+                  return;
+                }
                 if (!mobilePanelOpen) {
                   setMobilePanelOpen(true);
                   setMobileSheetSnap('half');
@@ -1731,10 +1786,10 @@ export default function App({
               <div className="mobile-sheet-snap-pills">
                 <small>
                   {mobileSheetSnap === 'peek'
-                    ? 'Hartă extinsă'
+                    ? '30% · Glisează în sus'
                     : mobileSheetSnap === 'half'
-                      ? 'Vizualizare mixtă'
-                      : 'Panou extins'}
+                      ? '54% · Glisează sus / jos'
+                      : '90% · Glisează în jos'}
                 </small>
               </div>
             </div>
@@ -2377,6 +2432,7 @@ export default function App({
                   onSelectMunicipal={selectMunicipalReport}
                   onSelectPin={selectPin}
                   onOpenTransport={() => switchModule('transport')}
+                  loading={municipalFeed.loading && stptFeed.status === 'loading'}
                 />
               ) : sidebarTab === 'transport' ? (
                 /* 2. TRANSPORT (Exclusiv linia selectată, Toggle Afișează Toate + Sub-filtre Tramvaie/Troleibuze/Autobuze, Tur/Retur) */
@@ -2643,7 +2699,13 @@ export default function App({
                         </button>
                       )}
 
-                    {visibleCitizenReports.length === 0 && visibleMunicipalReports.length === 0 && (
+                    {municipalFeed.loading &&
+                      visibleCitizenReports.length === 0 &&
+                      visibleMunicipalReports.length === 0 && <SkeletonCards count={4} />}
+
+                    {!municipalFeed.loading &&
+                      visibleCitizenReports.length === 0 &&
+                      visibleMunicipalReports.length === 0 && (
                       <div className="empty-state">
                         <AlertTriangle size={28} />
                         <h3>Nicio sesizare pentru filtrele selectate</h3>
@@ -2914,7 +2976,13 @@ export default function App({
                     {/* Citizen Community Activities & Discussions */}
                     {visibleCommunityPins.map(pin => renderPinCard(pin))}
 
-                    {visibleCityEvents.length === 0 && visibleCommunityPins.length === 0 && (
+                    {cityEventsFeed.loading &&
+                      visibleCityEvents.length === 0 &&
+                      visibleCommunityPins.length === 0 && <SkeletonCards count={3} />}
+
+                    {!cityEventsFeed.loading &&
+                      visibleCityEvents.length === 0 &&
+                      visibleCommunityPins.length === 0 && (
                       <div className="empty-state">
                         <Users size={28} />
                         <h3>Nu există evenimente sau discuții pe selecția curentă</h3>
@@ -3501,13 +3569,13 @@ export default function App({
                 selectedVeloStation={sidebarTab === 'velo' ? selectedVeloStation : null}
                 onSelectVeloStation={station => {
                   setSelectedVeloStation(station);
-                  setMobilePanelOpen(true);
+                  openMobileSheetForSelection();
                 }}
                 cityEvents={sidebarTab === 'community' ? visibleCityEvents : []}
                 selectedCityEvent={sidebarTab === 'community' ? selectedCityEvent : null}
                 onSelectCityEvent={ev => {
                   setSelectedCityEvent(ev);
-                  setMobilePanelOpen(true);
+                  openMobileSheetForSelection();
                 }}
                 municipalReports={mapMunicipalReports}
                 selectedMunicipal={selectedMunicipal}
@@ -3523,8 +3591,10 @@ export default function App({
                 onInspectPlace={place => {
                   switchModule('places');
                   setSelectedPlace(place);
+                  openMobileSheetForSelection();
                 }}
                 onInspectLine={info => setInfrastructureInspection(info)}
+                onViewportChange={setMapViewport}
               />
             </Suspense>
 
@@ -3651,17 +3721,30 @@ export default function App({
       </main>
 
       {/* Decoupled Creation / Edit Modal */}
-      {(modal === 'create-report' || modal === 'create-community' || modal === 'edit') && !pickTarget && (
-        <div className="modal-backdrop" role="presentation" onClick={() => setModal(null)}>
-          <div
-            className="modal wide"
-            ref={modalRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="form-title"
-            tabIndex={-1}
-            onClick={e => e.stopPropagation()}
+      <AnimatePresence>
+        {(modal === 'create-report' || modal === 'create-community' || modal === 'edit') && !pickTarget && (
+          <motion.div
+            className="modal-backdrop"
+            role="presentation"
+            onClick={() => setModal(null)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
           >
+            <motion.div
+              className="modal wide"
+              ref={modalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="form-title"
+              tabIndex={-1}
+              onClick={e => e.stopPropagation()}
+              initial={{ opacity: 0, y: 18, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 18, scale: 0.97 }}
+              transition={{ duration: 0.24, ease: [0.2, 0.8, 0.2, 1] }}
+            >
             <div className="modal-header">
               <div>
                 <span className="eyebrow">
@@ -3720,49 +3803,98 @@ export default function App({
               </div>
             )}
 
-            <form onSubmit={submitForm} className="create-form">
-              <div className="form-grid">
-                <label className="field full-width">
-                  Titlu
-                  <input
-                    required
-                    minLength={5}
-                    maxLength={100}
-                    value={form.title}
-                    onChange={e => setForm({ ...form, title: e.target.value })}
-                    placeholder={
-                      form.type === 'report'
-                        ? 'Ex.: Groapă periculoasă pe banda de circulație'
-                        : form.type === 'activity'
-                          ? 'Ex.: Ecologizare în Parcul Rozelor'
-                          : 'Ex.: Propuneri pentru amenajarea curții interioare'
-                    }
-                  />
-                </label>
-
-                <label className="field">
-                  {form.type === 'report' ? 'Pasul 1 · Categorie principală' : 'Categorie'}
-                  <select
-                    value={form.category}
-                    onChange={e => {
-                      const nextCat = e.target.value;
-                      const nextSub =
-                        form.type === 'report' ? reportSubcategories[nextCat]?.[0] : undefined;
-                      setForm({ ...form, category: nextCat, subcategory: nextSub });
-                    }}
+            <form
+              onSubmit={e => {
+                if (modal === 'create-report' && reportFormStep < 3) {
+                  e.preventDefault();
+                  setReportFormStep(curr => (curr < 3 ? ((curr + 1) as 1 | 2 | 3) : 3));
+                  return;
+                }
+                void submitForm(e);
+              }}
+              className="create-form"
+            >
+              {modal === 'create-report' && (
+                <div className="report-workflow-stepper" role="tablist" aria-label="Pași sesizare relațională">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={reportFormStep === 1}
+                    className={`workflow-step ${reportFormStep === 1 ? 'active' : 'completed'}`}
+                    onClick={() => setReportFormStep(1)}
                   >
-                    {meta[form.type].categories.map(c => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    <span className="workflow-step-dot">{reportFormStep > 1 ? '✓' : '1'}</span>
+                    <span>Categorie</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={reportFormStep === 2}
+                    className={`workflow-step ${reportFormStep === 2 ? 'active' : reportFormStep > 2 ? 'completed' : ''}`}
+                    onClick={() => setReportFormStep(2)}
+                  >
+                    <span className="workflow-step-dot">{reportFormStep > 2 ? '✓' : '2'}</span>
+                    <span>Subcategorie</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={reportFormStep === 3}
+                    className={`workflow-step ${reportFormStep === 3 ? 'active' : ''}`}
+                    onClick={() => setReportFormStep(3)}
+                  >
+                    <span className="workflow-step-dot">3</span>
+                    <span>Locație & Detalii</span>
+                  </button>
+                </div>
+              )}
 
-                {form.type === 'report' && (
-                  <label className="field">
-                    Pasul 2 · Subcategorie specifică
+              <div className="form-grid">
+                {modal === 'create-report' && reportFormStep === 1 && (
+                  <div className="field full-width">
+                    <span>Pasul 1 · Alege categoria principală a sesizării</span>
                     <select
+                      aria-label="Categorie principală"
+                      value={form.category}
+                      onChange={e => {
+                        const nextCat = e.target.value;
+                        const nextSub = reportSubcategories[nextCat]?.[0];
+                        setForm({ ...form, category: nextCat, subcategory: nextSub });
+                      }}
+                    >
+                      {meta.report.categories.map(c => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="report-relational-grid">
+                      {meta.report.categories.map(c => (
+                        <button
+                          type="button"
+                          key={c}
+                          className={`report-relational-pill ${form.category === c ? 'selected' : ''}`}
+                          onClick={() => {
+                            const nextSub = reportSubcategories[c]?.[0];
+                            setForm({ ...form, category: c, subcategory: nextSub });
+                            setReportFormStep(2);
+                          }}
+                        >
+                          <strong>{c}</strong>
+                          <small>{(reportSubcategories[c] || []).length} subcategorii</small>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {modal === 'create-report' && reportFormStep === 2 && (
+                  <div className="field full-width">
+                    <span>
+                      Pasul 2 · Alege subcategoria pentru <strong>{form.category}</strong>
+                    </span>
+                    <select
+                      aria-label="Subcategorie specifică"
                       value={form.subcategory || reportSubcategories[form.category]?.[0] || ''}
                       onChange={e => setForm({ ...form, subcategory: e.target.value })}
                     >
@@ -3772,121 +3904,225 @@ export default function App({
                         </option>
                       ))}
                     </select>
-                  </label>
-                )}
-
-                <label className={`field ${form.type === 'report' ? 'full-width' : ''}`}>
-                  Zonă sau reper
-                  <input
-                    required
-                    maxLength={100}
-                    value={form.place}
-                    onChange={e => setForm({ ...form, place: e.target.value })}
-                  />
-                </label>
-
-                <div className="field full-width">
-                  <span>Locație pe hartă (Coordonate GPS)</span>
-                  <div className="location-field">
-                    <div className="location-summary">
-                      <MapPin size={16} />
-                      <div>
-                        <strong>{form.place || 'Timișoara'}</strong>
-                        <small>
-                          {form.location.lat.toFixed(4)}, {form.location.lon.toFixed(4)}
-                        </small>
-                      </div>
-                    </div>
-                    <div className="two-actions">
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => setPickTarget('form')}
-                      >
-                        Alege pe hartă
-                      </button>
+                    <div className="report-relational-grid">
+                      {(reportSubcategories[form.category] || []).map(sub => {
+                        const isSelected = (form.subcategory || reportSubcategories[form.category]?.[0]) === sub;
+                        return (
+                          <button
+                            type="button"
+                            key={sub}
+                            className={`report-relational-pill ${isSelected ? 'selected' : ''}`}
+                            onClick={() => {
+                              setForm({ ...form, subcategory: sub });
+                              setReportFormStep(3);
+                            }}
+                          >
+                            <strong>{sub}</strong>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
-                </div>
+                )}
 
-                {form.type === 'activity' && (
+                {(modal !== 'create-report' || reportFormStep === 3) && (
                   <>
-                    <label className="field">
-                      Începe la
+                    {modal === 'create-report' && (
+                      <div className="field full-width">
+                        <div className="report-selected-relation">
+                          <span>
+                            <strong>{form.category}</strong> →{' '}
+                            {form.subcategory || reportSubcategories[form.category]?.[0]}
+                          </span>
+                          <button
+                            type="button"
+                            className="action-link"
+                            onClick={() => setReportFormStep(1)}
+                          >
+                            Schimbă
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <label className="field full-width">
+                      Titlu
                       <input
-                        type="datetime-local"
                         required
-                        value={form.startsAt || ''}
-                        onChange={e => setForm({ ...form, startsAt: e.target.value })}
-                      />
-                    </label>
-                    <label className="field">
-                      Se încheie la
-                      <input
-                        type="datetime-local"
-                        required
-                        value={form.endsAt || ''}
-                        onChange={e => setForm({ ...form, endsAt: e.target.value })}
-                      />
-                    </label>
-                    <label className="field">
-                      Locuri disponibile (opțional)
-                      <input
-                        type="number"
-                        min={1}
-                        max={500}
-                        value={form.capacity || ''}
-                        onChange={e =>
-                          setForm({
-                            ...form,
-                            capacity: e.target.value ? Number(e.target.value) : undefined,
-                          })
+                        minLength={5}
+                        maxLength={100}
+                        value={form.title}
+                        onChange={e => setForm({ ...form, title: e.target.value })}
+                        placeholder={
+                          form.type === 'report'
+                            ? 'Ex.: Groapă periculoasă pe banda de circulație'
+                            : form.type === 'activity'
+                              ? 'Ex.: Ecologizare în Parcul Rozelor'
+                              : 'Ex.: Propuneri pentru amenajarea curții interioare'
                         }
                       />
                     </label>
-                  </>
-                )}
 
-                <label className="field full-width">
-                  Descriere
-                  <textarea
-                    required
-                    minLength={10}
-                    maxLength={2000}
-                    rows={4}
-                    value={form.description}
-                    onChange={e => setForm({ ...form, description: e.target.value })}
-                    placeholder="Descrie situația clar și concis…"
-                  />
-                </label>
+                    {modal !== 'create-report' && (
+                      <>
+                        <label className="field">
+                          Categorie
+                          <select
+                            value={form.category}
+                            onChange={e => {
+                              const nextCat = e.target.value;
+                              const nextSub =
+                                form.type === 'report' ? reportSubcategories[nextCat]?.[0] : undefined;
+                              setForm({ ...form, category: nextCat, subcategory: nextSub });
+                            }}
+                          >
+                            {meta[form.type].categories.map(c => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
 
-                <div className="field full-width">
-                  <span>Fotografie {form.type === 'report' ? '(obligatorie)' : '(opțională)'}</span>
-                  {form.image ? (
-                    <div className="upload-preview">
-                      <img src={form.image} alt="Previzualizare" />
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => setForm({ ...form, image: undefined })}
-                      >
-                        Elimină fotografia
-                      </button>
-                    </div>
-                  ) : (
-                    <label className="upload-area">
-                      <Upload size={20} />
-                      <strong>Încarcă o fotografie din teren</strong>
-                      <span>JPG, PNG, WebP sau HEIC</span>
+                        {form.type === 'report' && (
+                          <label className="field">
+                            Subcategorie specifică
+                            <select
+                              value={form.subcategory || reportSubcategories[form.category]?.[0] || ''}
+                              onChange={e => setForm({ ...form, subcategory: e.target.value })}
+                            >
+                              {(reportSubcategories[form.category] || []).map(sub => (
+                                <option key={sub} value={sub}>
+                                  {sub}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                      </>
+                    )}
+
+                    <label className={`field ${form.type === 'report' ? 'full-width' : ''}`}>
+                      Zonă sau reper
                       <input
-                        type="file"
-                        accept={photoAccept}
-                        hidden
-                        onChange={e => onPhoto(e.target.files?.[0])}
+                        required
+                        maxLength={100}
+                        value={form.place}
+                        onChange={e => setForm({ ...form, place: e.target.value })}
                       />
                     </label>
-                  )}
-                </div>
+
+                    <div className="field full-width">
+                      <span>Locație pe hartă (Coordonate GPS)</span>
+                      <div className="location-field">
+                        <div className="location-summary">
+                          <MapPin size={16} />
+                          <div>
+                            <strong>{form.place || 'Timișoara'}</strong>
+                            <small>
+                              {form.location.lat.toFixed(5)}, {form.location.lon.toFixed(5)}
+                            </small>
+                          </div>
+                        </div>
+                        <div className="two-actions">
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={useGpsForForm}
+                          >
+                            <LocateFixed size={14} /> Locația mea GPS
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => setPickTarget('form')}
+                          >
+                            Alege pe hartă
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {form.type === 'activity' && (
+                      <>
+                        <label className="field">
+                          Începe la
+                          <input
+                            type="datetime-local"
+                            required
+                            value={form.startsAt || ''}
+                            onChange={e => setForm({ ...form, startsAt: e.target.value })}
+                          />
+                        </label>
+                        <label className="field">
+                          Se încheie la
+                          <input
+                            type="datetime-local"
+                            required
+                            value={form.endsAt || ''}
+                            onChange={e => setForm({ ...form, endsAt: e.target.value })}
+                          />
+                        </label>
+                        <label className="field">
+                          Locuri disponibile (opțional)
+                          <input
+                            type="number"
+                            min={1}
+                            max={500}
+                            value={form.capacity || ''}
+                            onChange={e =>
+                              setForm({
+                                ...form,
+                                capacity: e.target.value ? Number(e.target.value) : undefined,
+                              })
+                            }
+                          />
+                        </label>
+                      </>
+                    )}
+
+                    <label className="field full-width">
+                      Descriere
+                      <textarea
+                        required
+                        minLength={10}
+                        maxLength={2000}
+                        rows={4}
+                        value={form.description}
+                        onChange={e => setForm({ ...form, description: e.target.value })}
+                        placeholder="Descrie situația clar și concis…"
+                      />
+                    </label>
+
+                    <div className="field full-width">
+                      <span>Fotografie {form.type === 'report' ? '(obligatorie)' : '(opțională)'}</span>
+                      {form.image ? (
+                        <div className="upload-preview">
+                          <img src={form.image} alt="Previzualizare" />
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => setForm({ ...form, image: undefined })}
+                          >
+                            Elimină fotografia
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="upload-area">
+                          <Upload size={20} />
+                          <strong>Încarcă o fotografie din teren</strong>
+                          <span>JPG, PNG, WebP sau HEIC</span>
+                          <input
+                            type="file"
+                            accept={photoAccept}
+                            hidden
+                            onChange={e => onPhoto(e.target.files?.[0])}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
 
               {formError && (
@@ -3896,23 +4132,43 @@ export default function App({
               )}
 
               <div className="form-actions">
+                {modal === 'create-report' && reportFormStep > 1 && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => setReportFormStep(curr => (curr > 1 ? ((curr - 1) as 1 | 2 | 3) : 1))}
+                  >
+                    ← Înapoi
+                  </button>
+                )}
                 <button type="button" className="secondary" onClick={() => setModal(null)}>
                   Anulează
                 </button>
-                <button type="submit" className="primary" disabled={busy}>
-                  {busy
-                    ? 'Se salvează…'
-                    : modal === 'edit'
-                      ? 'Salvează modificările'
-                      : form.type === 'report'
-                        ? 'Înregistrează sesizarea'
-                        : 'Publică în Comunitate'}
-                </button>
+                {modal === 'create-report' && reportFormStep < 3 ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => setReportFormStep(curr => (curr < 3 ? ((curr + 1) as 1 | 2 | 3) : 3))}
+                  >
+                    Continuă la Pasul {reportFormStep + 1} →
+                  </button>
+                ) : (
+                  <button type="submit" className="primary" disabled={busy}>
+                    {busy
+                      ? 'Se salvează…'
+                      : modal === 'edit'
+                        ? 'Salvează modificările'
+                        : form.type === 'report'
+                          ? 'Înregistrează sesizarea'
+                          : 'Publică în Comunitate'}
+                  </button>
+                )}
               </div>
             </form>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* User Account Modal (Supabase + Google OAuth Login & Session Management) */}
       {modal === 'profile' && (

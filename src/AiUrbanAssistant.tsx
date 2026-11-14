@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   Bot,
   Compass,
@@ -18,7 +19,7 @@ import { distance } from './domain';
 import type { MapPlace } from './infrastructure';
 import type { MunicipalReport, MunicipalReportDetail } from './municipal-reports';
 import { municipalStatuses } from './municipal-reports';
-import type { LiveVehicle, StptAlert } from './stpt-live';
+import type { FeedState, LiveVehicle } from './stpt-live';
 import type { LineSummary } from './transitRouter';
 import { vehicleLabels } from './transitRouter';
 import type { VeloStation } from './velo-live';
@@ -29,6 +30,12 @@ import { normalizeSearch } from './place-catalog';
 export type RouteCandidate = {
   title: string;
   location: Point;
+};
+
+export type MapViewportState = {
+  center: Point;
+  bounds: { west: number; south: number; east: number; north: number };
+  zoom: number;
 };
 
 export type AiAssistantActionCallbacks = {
@@ -53,7 +60,7 @@ export type AiUrbanAssistantProps = {
   routeCandidates: RouteCandidate[];
   lineSummaries: LineSummary[];
   liveVehicles: LiveVehicle[];
-  stptAlerts: StptAlert[];
+  stptAlerts: FeedState['alerts'];
   municipalReports: MunicipalReport[];
   veloStations: VeloStation[];
   cityEvents: OfficialCityEvent[];
@@ -66,6 +73,7 @@ export type AiUrbanAssistantProps = {
   selectedPin?: Pin;
   selectedVeloStation: VeloStation | null;
   selectedCityEvent: OfficialCityEvent | null;
+  mapViewport?: MapViewportState;
   callbacks: AiAssistantActionCallbacks;
 };
 
@@ -414,6 +422,7 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
     selectedPin,
     selectedVeloStation,
     selectedCityEvent,
+    mapViewport,
     callbacks,
   } = props;
 
@@ -429,6 +438,7 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
   ]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const sheetDragStartY = useRef<number | null>(null);
 
   useEffect(() => {
     if (open && scrollRef.current) {
@@ -459,6 +469,9 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
     if (selectedTransportLine) {
       return `Linia STPT ${selectedTransportLine} (${selectedTransportDirection.toUpperCase()})`;
     }
+    if (mapViewport) {
+      return `Modul ${activeModule.toUpperCase()} · z${mapViewport.zoom.toFixed(1)} · ${liveVehicles.length} vehicule live`;
+    }
     return `Modul activ: ${activeModule.toUpperCase()} · ${liveVehicles.length} vehicule live`;
   })();
 
@@ -486,11 +499,14 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
       const navIntent = parseNavigationIntent(prompt);
       if (navIntent.isNavigation && navIntent.destinationRaw) {
         const destination = await geocodeLocation(navIntent.destinationRaw, routeCandidates);
-        const origin = navIntent.originRaw
-          ? (await geocodeLocation(navIntent.originRaw, routeCandidates)) ?? undefined
-          : userLocation
+        const resolvedCustomOrigin = navIntent.originRaw
+          ? await geocodeLocation(navIntent.originRaw, routeCandidates)
+          : null;
+        const origin: RouteCandidate =
+          resolvedCustomOrigin ??
+          (userLocation
             ? { title: 'Locația curentă (GPS)', location: userLocation }
-            : pointA;
+            : pointA);
 
         if (destination) {
           callbacks.onPlanRoute({
@@ -683,7 +699,7 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
                 toolName: 'inspect_active_entity',
                 summary: `inspect_active_entity(veloStation="${selectedVeloStation.name}")`,
               },
-              text: `Ai selectat stația **${selectedVeloStation.name}** (${selectedVeloStation.address}):\n• **Biciclete disponibile:** 🚲 ${selectedVeloStation.availableBikes}\n• **Dock-uri libere:** 🅿️ ${selectedVeloStation.freeDocks}\n• **Capacitate totală:** ${selectedVeloStation.capacity} locuri.`,
+              text: `Ai selectat stația **${selectedVeloStation.name}** (${selectedVeloStation.lat.toFixed(4)}, ${selectedVeloStation.lon.toFixed(4)}):\n• **Biciclete disponibile:** 🚲 ${selectedVeloStation.availableBikes}\n• **Dock-uri libere:** 🅿️ ${selectedVeloStation.freeDocks}\n• **Capacitate totală:** ${selectedVeloStation.totalDocks} locuri.`,
               quickRoute: {
                 destination: {
                   title: selectedVeloStation.name,
@@ -720,6 +736,46 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
           ]);
           return;
         }
+      }
+
+      const asksAboutViewportOrArea =
+        /\b(in aceasta zona|în această zonă|ce e in zona|ce este in zona|ce este aici|ce e aici|in jur|în jur|around here|this area|near me|aproape de mine|pe harta|pe hartă)\b/i.test(
+          norm,
+        );
+
+      if ((asksAboutSelectedContext || asksAboutViewportOrArea) && mapViewport) {
+        const inViewport = (pt: Point) =>
+          pt.lon >= mapViewport.bounds.west &&
+          pt.lon <= mapViewport.bounds.east &&
+          pt.lat >= mapViewport.bounds.south &&
+          pt.lat <= mapViewport.bounds.north;
+
+        const visibleVehicles = liveVehicles.filter(v => inViewport({ lon: v.lon, lat: v.lat }));
+        const visibleVelo = veloStations.filter(s => inViewport({ lon: s.lon, lat: s.lat }));
+        const visibleReports = municipalReports.filter(r => r.coordinates && inViewport({ lon: r.coordinates[0], lat: r.coordinates[1] }));
+        const visibleEvents = cityEvents.filter(e => inViewport({ lon: e.lon, lat: e.lat }));
+        const nearbyPlaces = routeCandidates
+          .filter(p => inViewport(p.location))
+          .sort((a, b) => distance(a.location, mapViewport.center) - distance(b.location, mapViewport.center))
+          .slice(0, 5);
+        const centerOsm = await fetchOsmPlaceMetadata(mapViewport.center);
+
+        const activeLines = [...new Set(visibleVehicles.map(v => v.line))].slice(0, 8);
+        setMessages(prev => [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: 'assistant',
+            timestamp: new Date().toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' }),
+            toolCall: {
+              toolName: 'inspect_active_entity',
+              summary: `inspect_viewport(zoom=${mapViewport.zoom.toFixed(1)}, vehicles=${visibleVehicles.length}, pois=${nearbyPlaces.length})`,
+            },
+            text: `**Analiză geospațială a zonei vizibile pe hartă** (zoom \`${mapViewport.zoom.toFixed(1)}\` · centru \`${mapViewport.center.lat.toFixed(4)}, ${mapViewport.center.lon.toFixed(4)}\`):\n${centerOsm ? `• **${centerOsm}**\n` : ''}• **Vehicule STPT în zonă:** ${visibleVehicles.length}${activeLines.length ? ` (liniile ${activeLines.join(', ')})` : ''}\n• **Stații VeloTM în cadru:** ${visibleVelo.length} (${visibleVelo.reduce((s, v) => s + v.availableBikes, 0)} biciclete disponibile)\n• **Sesizări PMT & Evenimente în cadru:** ${visibleReports.length} sesizări · ${visibleEvents.length} evenimente\n${nearbyPlaces.length ? `• **Repere principale din cadru:** ${nearbyPlaces.map(p => p.title).join(', ')}` : ''}`,
+            sourceLabel: 'OpenStreetMap Nominatim + Telemetrie live',
+          },
+        ]);
+        return;
       }
 
       // =========================================================================
@@ -880,13 +936,31 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
       </button>
 
       {/* Glassmorphism Chat Panel (Desktop) / Swipeable Bottom Sheet (Mobile) */}
-      {open && (
-        <aside
-          className="ai-assistant-panel"
-          role="dialog"
-          aria-label="Asistent Urban AI Timișoara"
-        >
-          <div className="ai-sheet-handle" onClick={onToggleOpen} aria-hidden="true">
+      <AnimatePresence>
+        {open && (
+          <motion.aside
+            className="ai-assistant-panel"
+            role="dialog"
+            aria-label="Asistent Urban AI Timișoara"
+            initial={{ opacity: 0, y: 14, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 14, scale: 0.96 }}
+            transition={{ duration: 0.24, ease: [0.2, 0.8, 0.2, 1] }}
+          >
+          <div
+            className="ai-sheet-handle"
+            aria-hidden="true"
+            onPointerDown={e => {
+              sheetDragStartY.current = e.clientY;
+            }}
+            onPointerUp={e => {
+              if (sheetDragStartY.current !== null && e.clientY - sheetDragStartY.current > 32) {
+                onToggleOpen();
+              }
+              sheetDragStartY.current = null;
+            }}
+            onClick={onToggleOpen}
+          >
             <span />
           </div>
 
@@ -1026,8 +1100,9 @@ export function AiUrbanAssistant(props: AiUrbanAssistantProps) {
               <Send size={15} />
             </button>
           </form>
-        </aside>
-      )}
+          </motion.aside>
+        )}
+      </AnimatePresence>
     </>
   );
 }

@@ -114,3 +114,43 @@ html[data-theme='dark'] .workflow-step-dot {
 html[data-theme='dark'] .workflow-step.completed {
   color: #f8fafc;
 }
+
+
+/* === DARK GLASSMORPHISM & SKELETON OVERRIDES === */
+html[data-theme='dark'] .app-shell.map-first {
+  --glass-bg: rgba(15, 25, 42, 0.82);
+  --glass-bg-strong: rgba(15, 25, 42, 0.91);
+  --glass-border: rgba(148, 163, 184, 0.24);
+  --glass-shadow: 0 10px 36px rgba(0, 0, 0, 0.38);
+}
+html[data-theme='dark'] .app-shell.map-first .global-search {
+  background: rgba(30, 41, 59, 0.78);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+html[data-theme='dark'] .app-shell.map-first :is(.sidebar-tabs, .sidebar-bottom) {
+  background: rgba(15, 25, 42, 0.54);
+}
+html[data-theme='dark'] .skeleton-card {
+  background: rgba(30, 41, 59, 0.72);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+html[data-theme='dark'] .skeleton-card::after {
+  background: linear-gradient(90deg, transparent 0%, rgba(148, 163, 184, 0.16) 50%, transparent 100%);
+}
+html[data-theme='dark'] .skeleton-line {
+  background: rgba(71, 85, 105, 0.65);
+}
+html[data-theme='dark'] .report-relational-pill {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(148, 163, 184, 0.25);
+  color: var(--night-text);
+}
+html[data-theme='dark'] .report-relational-pill.selected {
+  background: rgba(37, 99, 235, 0.22);
+  border-color: #60a5fa;
+}
+html[data-theme='dark'] .report-selected-relation {
+  background: rgba(37, 99, 235, 0.18);
+  border-color: rgba(96, 165, 250, 0.35);
+  color: var(--night-text);
+}

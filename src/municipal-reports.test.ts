@@ -21,9 +21,44 @@ describe('municipal reports', () => {
     expect(reports[0].coordinates).toBeUndefined();
   });
 
+  it('includes all 5 official statuses, description, and CloudFront photo URL when includeAllStatuses is true', () => {
+    const now = Date.parse('2026-11-14T12:00:00Z');
+    const reports = normalizeMunicipalReports([
+      {
+        webconInstanceNr: 'SZN2026-10',
+        status: 'Finalizata',
+        createdAt: new Date(now - 5000).toISOString(),
+        descriere: 'Intervenție finalizată pe carosabil.',
+        files: [{ path: 'sesizari/2026/photo1.jpg' }],
+      },
+      {
+        webconInstanceNr: 'SZN2026-11',
+        status: 'Declinata competenta',
+        createdAt: new Date(now - 2000).toISOString(),
+      },
+    ], now, true);
+    expect(reports.map(r => r.number)).toEqual(['SZN2026-10', 'SZN2026-11']);
+    expect(reports[0].status).toBe('Finalizata');
+    expect(reports[0].description).toBe('Intervenție finalizată pe carosabil.');
+    expect(reports[0].photoUrl).toBe('https://d6r4wmx5epyg3.cloudfront.net/sesizari/2026/photo1.jpg');
+  });
+
   it('lets only the author set and clear the community report marker', () => {
-    const state = createSeed();
-    const action = { type: 'setMunicipalReported', pinId: 'seed-road', userId: 'mihai', enabled: true } as const;
+    const state = mutate(createSeed(), {
+      type: 'create',
+      id: 'rep-real-1',
+      userId: 'mihai',
+      input: {
+        type: 'report',
+        title: 'Pavaj deteriorat pe Bulevardul Republicii',
+        description: 'Dale desprinse pe trotuarul pietonal din centrul orașului.',
+        category: 'Accesibilitate',
+        place: 'Bulevardul Republicii',
+        location: { lon: 21.2182, lat: 45.7545 },
+        image: 'data:image/webp;base64,realphoto',
+      },
+    });
+    const action = { type: 'setMunicipalReported', pinId: 'rep-real-1', userId: 'mihai', enabled: true } as const;
     expect(() => mutate(state, { ...action, userId: 'ana' })).toThrow('autorul');
     const marked = mutate(state, action);
     expect(marked.pins.find(pin => pin.id === action.pinId)?.reportedToMunicipality).toBe(true);

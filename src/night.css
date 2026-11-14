@@ -1,30 +1,36 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
   color: #e5eef9;
-  background: #101925;
+  background: #0A1628;
   --ink: #e5eef9;
+  --ink-strong: #f1f5f9;
+  --ink-body: #cbd5e1;
+  --ink-muted: #94a3b8;
   --muted: #abbcd1;
-  --paper: #172332;
-  --line: #34465d;
-  --night-bg: #111c2b;
-  --night-surface: #172332;
-  --night-raised: #202e42;
+  --paper: #132034;
+  --surface-white: #132034;
+  --surface-subtle: #1A2B44;
+  --border-neutral: #2B3F5C;
+  --line: #2B3F5C;
+  --night-bg: #0A1628;
+  --night-surface: #132034;
+  --night-raised: #1D2F4A;
   --night-text: #e5eef9;
   --night-muted: #adbed2;
-  --night-border: #34465d;
-  --night-accent: #9fc6ff;
-  --brand-blue: #9fc6ff;
-  --brand-hover: #c3dcff;
-  --brand-soft: #20344f;
-  --brand-border: #385579;
+  --night-border: #2B3F5C;
+  --night-accent: #60A5FA;
+  --brand-blue: #60A5FA;
+  --brand-hover: #93C5FD;
+  --brand-soft: #1E3A5F;
+  --brand-border: #2E548A;
 }
 
-[data-theme="dark"] .map-first :is(.app-header, .sidebar-tabs, .discovery, .modal, .pin-chat, .mobile-map-nav, .detail-panel, .pin-card, .toast, .map-loading, .map-error, .picking-notice) {
+[data-theme="dark"] .map-first :is(.app-header, .sidebar-tabs, .discovery, .modal, .pin-chat, .mobile-map-nav, .detail-panel, .pin-card, .toast, .map-loading, .map-error, .picking-notice, .omni-search-dropdown, .floating-layers-popover, .vehicle-row-card, .line-catalog-row, .portal-link-card) {
   background: var(--night-surface);
   border-color: var(--night-border);
   color: var(--night-text);
 }
-[data-theme="dark"] .map-first :is(.global-search, .search-box, .theme-toggle, .sidebar-bottom, .community-saved, .secondary, .results-count, .list-options summary, .list-options-body, .detail-menu, .layer-row, .active-layer-legend, .data-notes, .location-field, .route-start, .route-stop, .route-notice, .empty-route, .message, .message-composer, .place-result-symbol, .place-detail-icon, .pin-chat-symbol, .map-utility-controls > button, .maplibregl-ctrl-group, .maplibregl-ctrl-attrib) {
+[data-theme="dark"] .map-first :is(.global-search, .search-box, .theme-toggle, .sidebar-bottom, .community-saved, .secondary, .results-count, .list-options summary, .list-options-body, .detail-menu, .layer-row, .active-layer-legend, .data-notes, .location-field, .route-start, .route-stop, .route-notice, .empty-route, .message, .message-composer, .place-result-symbol, .place-detail-icon, .pin-chat-symbol, .map-utility-controls > button, .maplibregl-ctrl-group, .maplibregl-ctrl-attrib, .hub-tile, .kpi-box, .telemetry-card, .vehicle-hero-card, .municipal-description-box, .municipal-history-box, .velo-layers-box, .map-chip:not(.active), .pill-toggle:not(.on), .place-category-pills button:not(.active)) {
   background: var(--night-raised);
   border-color: var(--night-border);
   color: var(--night-text);
@@ -39,19 +45,19 @@
 }
 [data-theme="dark"] .map-first .data-notes { background: transparent; border: 0; }
 [data-theme="dark"] .map-first .map-area { background: var(--night-bg); }
-[data-theme="dark"] .map-first :is(.primary, .message-composer button) { background: #215fbf; color: #fff; }
-[data-theme="dark"] .map-first :is(.primary, .message-composer button):hover:not(:disabled) { background: #286dcc; }
+[data-theme="dark"] .map-first :is(.primary, .message-composer button, .map-chip.active, .place-category-pills button.active) { background: #1D5ED8; border-color: #1D5ED8; color: #fff; }
+[data-theme="dark"] .map-first :is(.primary, .message-composer button):hover:not(:disabled) { background: #2563EB; }
 [data-theme="dark"] .map-first :is(.secondary, .theme-toggle, .pin-chat-symbol, .card-chat, .header-saved, .place-share, .osm-link, .back-link, .community-saved, .place-detail-icon, .maplibregl-ctrl-attrib a) { color: var(--night-accent); }
-[data-theme="dark"] .map-first :is(.secondary, .theme-toggle, .sidebar-tabs > button, .pin-card, .card-chat, .card-bookmark, .icon-btn, .layer-row, .place-result-row, .detail-menu button, .header-saved, .map-utility-controls > button):hover,
-[data-theme="dark"] .map-first :is(.pin-card.is-selected, .pin-card:has(.card-chat[aria-expanded=true]), .layer-row.on, .card-chat[aria-expanded=true], .travel-mode-picker > button.active, .create-types > button.selected) { background: var(--brand-soft); border-color: var(--brand-border); }
+[data-theme="dark"] .map-first :is(.secondary, .theme-toggle, .sidebar-tabs > button, .pin-card, .card-chat, .card-bookmark, .icon-btn, .layer-row, .place-result-row, .detail-menu button, .header-saved, .map-utility-controls > button, .hub-tile, .vehicle-row-card, .line-catalog-row, .portal-link-card, .omni-item):hover,
+[data-theme="dark"] .map-first :is(.pin-card.is-selected, .pin-card:has(.card-chat[aria-expanded=true]), .layer-row.on, .card-chat[aria-expanded=true], .travel-mode-picker > button.active, .create-types > button.selected, .vehicle-row-card.selected, .pill-toggle.on) { background: var(--brand-soft); border-color: var(--brand-border); }
 [data-theme="dark"] .map-first :is(.global-search input, .search-box input, .message-composer input, .modal input, .modal textarea, select) { color: var(--night-text); }
 [data-theme="dark"] .map-first :is(.modal input:not([type=file]), .modal textarea, select) { background: var(--night-bg); border-color: var(--night-border); }
 [data-theme="dark"] .map-first :is(input, textarea)::placeholder { color: var(--night-muted); }
-[data-theme="dark"] .map-first :is(h1, h2, h3, .pin-card h3, .modal-header h2, .place-result strong, .detail-description, .card-description, .message-author strong, .message p, .support-count, .layer-row-copy strong, .help-steps strong, .location-summary strong) { color: var(--night-text); }
+[data-theme="dark"] .map-first :is(h1, h2, h3, .pin-card h3, .modal-header h2, .place-result strong, .detail-description, .card-description, .message-author strong, .message p, .support-count, .layer-row-copy strong, .help-steps strong, .location-summary strong, .hub-tile strong, .vehicle-row-copy strong, .line-catalog-copy strong, .portal-link-card strong) { color: var(--night-text); }
 [data-theme="dark"] .map-first :is(.pin-chat-header p, .pin-chat .no-messages, .header-city, .card-footer, .card-date, .place, .place-result small, .place-result-count, .place-category, .place-category-filter, .place-address, .source-note, .sidebar-tabs > button:not(.active), .mobile-map-nav > button:not(.active), .detail-place, .detail-author small, .activity-facts small, .field, .field small, .field-label, .section-label, .location-summary small, .route-start small, .route-stop small, .route-result p, .route-result > small, .eyebrow, .routing-attribution, .help-steps p, .publish-note p, .info-box p, .upload-area span, .layer-status, .layer-row-copy small, .layer-group h2, .layer-group h2 span, .data-notes p, .data-notes summary, .list-options-body, .message-author time, .muted-text, .demo-label, .card-bookmark, .icon-btn) { color: var(--night-muted); }
 [data-theme="dark"] .map-first :is(.list-options, .results-heading, .place-result-row, .place-result-count, .layer-group, .detail-toolbar, .detail-author, .sidebar-bottom, .message-composer, .maplibregl-ctrl-group button + button) { border-color: var(--night-border); }
 [data-theme="dark"] .map-first :is(.card-date, .create-types > button, .travel-mode-picker > button, .related-pin, .organizer-note, .status-badge, .support-button.supported > span, .layer-row .switch, .demo-label) { background: var(--night-raised); color: var(--night-text); border-color: var(--night-border); }
-[data-theme="dark"] .map-first .layer-row input:checked + .switch { background: #286dcc; }
+[data-theme="dark"] .map-first .layer-row input:checked + .switch { background: #2563EB; }
 [data-theme="dark"] .map-first .layer-row input:not(:checked) + .switch { background: #475b75; }
 [data-theme="dark"] .map-first .community-saved { background: transparent; }
 [data-theme="dark"] .map-first :is(.route-start, .route-stop, .activity-facts) strong { color: var(--night-text); }
@@ -74,3 +80,37 @@
 [data-theme="dark"] .transit-result { --transit-paper: #192b43; --transit-border: #435978; --transit-muted: #c5d4e9; }
 [data-theme="dark"] .transit-stop-marker { color: #edf5ff; }
 [data-theme="dark"] .transit-stop-marker :is(b, span) { background: #14223a; }
+
+[data-theme="dark"] .map-first :is(.map-context-pill, .show-all-routes-toggle:not(.active), .tur-retur-selector button:not(.active), .stpt-line-btn:not(.selected), .selected-line-stops-box, .temporal-filter-bar button:not(.active), .velo-metric, .gmaps-route-box, .endpoint-input-wrap, .endpoint-suggestions, .route-swap-btn) {
+  background: var(--night-raised);
+  border-color: var(--night-border);
+  color: var(--night-text);
+}
+[data-theme="dark"] .map-first :is(.selected-line-banner, .selected-velo-station-card) {
+  background: var(--brand-soft);
+  border-color: var(--brand-border);
+  color: var(--night-text);
+}
+[data-theme="dark"] .map-first .velo-map-marker {
+  background: var(--night-surface);
+  color: var(--night-text);
+}
+
+
+html[data-theme='dark'] .report-workflow-stepper {
+  background: #0f172a;
+  border-color: #1e293b;
+}
+
+html[data-theme='dark'] .workflow-step {
+  color: #64748b;
+}
+
+html[data-theme='dark'] .workflow-step-dot {
+  background: #1e293b;
+  color: #94a3b8;
+}
+
+html[data-theme='dark'] .workflow-step.completed {
+  color: #f8fafc;
+}

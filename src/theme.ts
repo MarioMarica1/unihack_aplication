@@ -9,7 +9,7 @@ export function readTheme(): Theme {
 
 export function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#111c2b' : '#196b56');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0A1628' : '#0F52BA');
 }
 
 export function saveTheme(theme: Theme) {

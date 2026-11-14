@@ -23,9 +23,25 @@ export type Message = { id: string; pinId: string; authorId: string; body: strin
 export type State = { version: 1; pins: Pin[]; messages: Message[]; saved: Record<string, string[]>; flags: { pinId: string; userId: string; reason: string }[]; people?: Person[] };
 export const center: Point = { lon: 21.2257, lat: 45.7557 };
 export const meta = {
-  report: { label: 'Sesizare', plural: 'Sesizări', color: '#d47a42', categories: ['Infrastructură', 'Curățenie', 'Spații verzi', 'Iluminat', 'Accesibilitate'] },
-  activity: { label: 'Activitate', plural: 'Activități', color: '#26765c', categories: ['Voluntariat', 'Sport', 'Social', 'Cultură'] },
-  discussion: { label: 'Discuție', plural: 'Discuții', color: '#8d76b8', categories: ['Idei pentru cartier', 'Întrebare', 'Recomandări'] },
+  report: {
+    label: 'Sesizare',
+    plural: 'Sesizări',
+    color: '#0F52BA',
+    categories: [
+      'Infrastructură',
+      'Curățenie',
+      'Spații verzi',
+      'Iluminat',
+      'Accesibilitate',
+      'Străzi și trotuare',
+      'Parcări neregulamentare',
+      'Transport public STPT',
+      'Șantiere și lucrări',
+      'Semnalizare rutieră',
+    ],
+  },
+  activity: { label: 'Activitate', plural: 'Activități', color: '#059669', categories: ['Voluntariat', 'Sport', 'Social', 'Cultură'] },
+  discussion: { label: 'Discuție', plural: 'Discuții', color: '#0F52BA', categories: ['Idei pentru cartier', 'Întrebare', 'Recomandări'] },
 };
 
 export const pointSchema = z.object({
@@ -60,7 +76,7 @@ export type Action =
 
 export function mutate(original: State, action: Action): State {
   const state = structuredClone(original);
-  if (!people.some(p => p.id === action.userId)) throw new Error('Alege un profil demo înainte de a continua.');
+  if (!people.some(p => p.id === action.userId)) throw new Error('Alege un cont valid înainte de a continua.');
   const now = new Date().toISOString();
   if (action.type === 'create') {
     if (state.pins.some(p => p.id === action.id)) return state;
@@ -145,17 +161,5 @@ export function activityState(pin: Pin): string {
 export const dateLabel = (iso: string, options?: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('ro-RO', { timeZone: 'Europe/Bucharest', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', ...options }).format(new Date(iso));
 
 export function createSeed(): State {
-  const nextDay = (offset: number, hour: number) => { const d = new Date(); d.setDate(d.getDate() + offset); d.setHours(hour, 0, 0, 0); return d.toISOString(); };
-  const base = { createdAt: new Date().toISOString(), demo: true, supports: [], participants: [], status: 'open' as const };
-  const pins: Pin[] = [
-    { ...base, id: 'seed-clean', type: 'activity', title: 'Un parc mai verde, împreună', description: 'Ne întâlnim la intrarea în Parcul Central pentru o oră de curățenie și o cafea după. Adu o pereche de mănuși și voie bună. Sacii îi aducem noi. Exemplu demonstrativ, nu este un eveniment real.', category: 'Voluntariat', place: 'Parcul Central Anton Scudier', location: { lon: 21.2184, lat: 45.7503 }, authorId: 'ana', status: 'active', startsAt: nextDay(1, 10), endsAt: nextDay(1, 12), capacity: 12, participants: ['ana', 'mihai'], image: '/illustrations/park.svg' },
-    { ...base, id: 'seed-road', type: 'report', title: 'Pavaj deteriorat lângă parc', description: 'Câteva dale sunt desprinse pe aleea de acces. Ar fi util să verificăm zona, în special pentru persoanele cu mobilitate redusă. Aceasta este o sesizare DEMO, nu o constatare din teren.', category: 'Accesibilitate', place: 'Bulevardul Republicii', location: { lon: 21.2182, lat: 45.7545 }, authorId: 'mihai', supports: ['ana'], image: '/illustrations/street.svg' },
-    { ...base, id: 'seed-football', type: 'activity', title: 'Cine vine la un meci de baschet?', description: 'Un meci relaxat, pentru orice nivel. Ne încălzim și facem echipe la fața locului. Participarea este gratuită. Exemplu demonstrativ; locația nu reprezintă o rezervare reală de teren.', category: 'Sport', place: 'Zona Complexului Studențesc', location: { lon: 21.241, lat: 45.7458 }, authorId: 'mihai', status: 'active', startsAt: nextDay(2, 17), endsAt: nextDay(2, 19), capacity: 8, participants: ['mihai'], image: '/illustrations/court.svg' },
-    { ...base, id: 'seed-bike', type: 'discussion', title: 'Pe unde mergem cu bicicleta?', description: 'Ce trasee liniștite recomandați pentru o plimbare de seară pe lângă Bega? Strângem idei de la vecini. Discuție demonstrativă.', category: 'Recomandări', place: 'Malul Begăi', location: { lon: 21.2318, lat: 45.7478 }, authorId: 'ana' },
-    { ...base, id: 'seed-light', type: 'report', title: 'Iluminat de verificat pe alee', description: 'Exemplu de sesizare despre iluminatul public. Date demonstrative; nu indică o defecțiune verificată în această locație.', category: 'Iluminat', place: 'Parcul Civic', location: { lon: 21.2342, lat: 45.7545 }, authorId: 'ana', supports: ['radu'] },
-    { ...base, id: 'seed-book', type: 'discussion', title: 'Un colț de schimb de cărți?', description: 'Cum ar fi să avem o mică bibliotecă de cartier? Ce loc ar fi potrivit și cine ar dori să ajute? Idee demonstrativă pentru testarea aplicației.', category: 'Idei pentru cartier', place: 'Piața Unirii', location: { lon: 21.2288, lat: 45.758 }, authorId: 'mihai' },
-    { ...base, id: 'seed-walk', type: 'activity', title: 'La pas prin cartier', description: 'O plimbare și o conversație despre locurile preferate din oraș. Exemplu demonstrativ, nu este un tur organizat real.', category: 'Social', place: 'Piața Maria', location: { lon: 21.2201, lat: 45.7455 }, authorId: 'radu', status: 'active', startsAt: nextDay(3, 16), endsAt: nextDay(3, 18), participants: ['radu'] },
-    { ...base, id: 'seed-green', type: 'report', title: 'Coș de gunoi pentru spațiul verde', description: 'Exemplu demonstrativ de propunere pentru curățenia din cartier. Poziția este orientativă și nu descrie o problemă verificată.', category: 'Curățenie', place: 'Zona Cetate', location: { lon: 21.2235, lat: 45.7601 }, authorId: 'mihai' },
-  ];
-  return { version: 1, pins, messages: [{ id: 'seed-msg-1', pinId: 'seed-clean', authorId: 'ana', body: 'Salut! Acesta este chatul demo. Poți schimba profilul și testa conversația.', createdAt: new Date().toISOString() }], saved: {}, flags: [] };
+  return { version: 1, pins: [], messages: [], saved: {}, flags: [] };
 }

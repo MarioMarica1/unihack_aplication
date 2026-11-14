@@ -5,11 +5,11 @@ import { calculateRoute } from './routing';
 import { tramColors } from './tram-lines';
 import { busLineColor } from './transport-colors';
 
-type VehicleType = 'tram' | 'bus' | 'trolleybus';
+export type VehicleType = 'tram' | 'bus' | 'trolleybus';
 export type TransitStop = Point & { name: string };
 type Call = [stop: number, shapeIndex: number, pickup: number, dropoff: number];
-type Pattern = { type: VehicleType; line: string; direction: string; shape: Position[]; stops: Call[] };
-export type TransitNetwork = { validFrom: string; validTo: string; stops: TransitStop[]; patterns: Pattern[] };
+export type TransitPattern = { type: VehicleType; line: string; direction: string; shape: Position[]; stops: Call[] };
+export type TransitNetwork = { validFrom: string; validTo: string; stops: TransitStop[]; patterns: TransitPattern[] };
 type Segment = { distance: number; duration: number; geometry: LineString };
 type Walk = Segment & { kind: 'walk'; from: string; to: string; transfer: boolean; approximate: boolean };
 type Ride = Segment & {
@@ -85,7 +85,6 @@ function optionsForLeg(network: TransitNetwork, graph: ReturnType<typeof prepare
     if (score < (candidates.get(key)?.score ?? Infinity)) candidates.set(key, { rides, score });
   }
 
-  // Find the cheapest remaining ride on each line from every boarding stop.
   graph.boardings.forEach((boardings, stop) => {
     const choices = new Map<string, { ride: RideChoice; score: number }>();
     for (const boarding of boardings) {
@@ -170,7 +169,7 @@ export function searchTransit(network: TransitNetwork, points: TransitPoint[]): 
 
 let cachedNetwork: TransitNetwork | undefined;
 
-export async function planTransit(points: TransitPoint[], signal: AbortSignal) {
+export async function loadTransitNetwork(signal?: AbortSignal): Promise<TransitNetwork> {
   if (!cachedNetwork) {
     const response = await fetch('/data/stpt-network.json', { signal });
     if (!response.ok) throw new Error('Nu am putut încărca rețeaua STPT. Reîncearcă.');
@@ -178,12 +177,15 @@ export async function planTransit(points: TransitPoint[], signal: AbortSignal) {
     if (!data.stops?.length || !data.patterns?.length) throw new Error('Rețeaua STPT nu conține trasee. Reîncearcă.');
     cachedNetwork = data;
   }
-  const network = cachedNetwork;
+  return cachedNetwork;
+}
+
+export async function planTransit(points: TransitPoint[], signal: AbortSignal) {
+  const network = await loadTransitNetwork(signal);
   const options = searchTransit(network, points);
   const refined = new Map<Walk, Walk>();
   const requests = new Map<string, Promise<Segment | undefined>>();
   const walkingSignal = AbortSignal.any([signal, AbortSignal.timeout(6500)]);
-  // Try the best option first and share identical walking requests across variants.
   for (const option of options) for (const step of option.steps) {
     if (step.kind !== 'walk' || step.distance < 25) continue;
     const key = JSON.stringify(step.geometry.coordinates);
@@ -203,4 +205,96 @@ export async function planTransit(points: TransitPoint[], signal: AbortSignal) {
   signal.throwIfAborted();
   const estimates = options.map(option => summarize(option.steps.map(step => step.kind === 'walk' ? refined.get(step) ?? step : step)));
   return { options: estimates, validFrom: network.validFrom, validTo: network.validTo };
+}
+
+export type UpcomingStopEstimate = {
+  stop: TransitStop;
+  distanceMeters: number;
+  estimatedMinutes: number;
+};
+
+export function findNextVehicleStops(
+  network: TransitNetwork,
+  vehicle: { type: VehicleType; line: string; lat: number; lon: number; headsign?: string; stop?: string },
+): { direction: string; upcoming: UpcomingStopEstimate[] } | undefined {
+  const lineUpper = vehicle.line.toUpperCase();
+  const matching = network.patterns.filter(p => p.line.toUpperCase() === lineUpper);
+  if (!matching.length) return undefined;
+
+  const headsignNorm = (vehicle.headsign ?? '').toLocaleLowerCase('ro').trim();
+  const preferred = headsignNorm
+    ? matching.find(p => p.direction.toLocaleLowerCase('ro').includes(headsignNorm) || headsignNorm.includes(p.direction.toLocaleLowerCase('ro'))) ?? matching[0]
+    : matching[0];
+
+  const pos: Point = { lon: vehicle.lon, lat: vehicle.lat };
+  let closestCallIndex = 0;
+  let closestDist = Infinity;
+
+  preferred.stops.forEach(([stopIdx], callIndex) => {
+    const st = network.stops[stopIdx];
+    if (!st) return;
+    const d = distance(pos, st);
+    if (d < closestDist) {
+      closestDist = d;
+      closestCallIndex = callIndex;
+    }
+  });
+
+  const speedMps = speeds[preferred.type] || 5.5;
+  const upcoming: UpcomingStopEstimate[] = [];
+  let cumulativeMeters = 0;
+  let prevPoint = pos;
+
+  for (let i = closestCallIndex; i < Math.min(preferred.stops.length, closestCallIndex + 8); i++) {
+    const [stopIdx] = preferred.stops[i];
+    const st = network.stops[stopIdx];
+    if (!st) continue;
+    cumulativeMeters += distance(prevPoint, st);
+    prevPoint = st;
+    upcoming.push({
+      stop: st,
+      distanceMeters: Math.round(cumulativeMeters),
+      estimatedMinutes: Math.max(1, Math.round(cumulativeMeters / speedMps / 60)),
+    });
+  }
+
+  return { direction: preferred.direction, upcoming };
+}
+
+export type LineDirectionSummary = {
+  dirKey: 'tur' | 'retur';
+  direction: string;
+  stops: TransitStop[];
+  shape: Position[];
+};
+
+export type LineSummary = {
+  line: string;
+  type: VehicleType;
+  color: string;
+  directions: LineDirectionSummary[];
+};
+
+export function getLineSummaries(network: TransitNetwork): LineSummary[] {
+  const byKey = new Map<string, LineSummary>();
+  for (const pattern of network.patterns) {
+    const key = `${pattern.type}:${pattern.line}`;
+    let entry = byKey.get(key);
+    if (!entry) {
+      const color = pattern.type === 'tram'
+        ? tramColors[pattern.line as keyof typeof tramColors] ?? '#0F52BA'
+        : busLineColor(pattern.line);
+      entry = { line: pattern.line, type: pattern.type, color, directions: [] };
+      byKey.set(key, entry);
+    }
+    const stops = pattern.stops.map(([idx]) => network.stops[idx]).filter(Boolean);
+    if (!entry.directions.some(d => d.direction === pattern.direction)) {
+      const dirKey: 'tur' | 'retur' = entry.directions.length === 0 ? 'tur' : 'retur';
+      entry.directions.push({ dirKey, direction: pattern.direction, stops, shape: pattern.shape });
+    }
+  }
+  const typeOrder: Record<VehicleType, number> = { tram: 1, trolleybus: 2, bus: 3 };
+  return [...byKey.values()].sort((a, b) =>
+    typeOrder[a.type] - typeOrder[b.type] || a.line.localeCompare(b.line, 'ro', { numeric: true }),
+  );
 }

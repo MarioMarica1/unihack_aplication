@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { searchTransit } from './transitRouter';
+import { findNextVehicleStops, getLineSummaries, searchTransit } from './transitRouter';
 import type { TransitNetwork } from './transitRouter';
 
 const stops = [
@@ -41,5 +41,20 @@ describe('Rutare STPT', () => {
     const [result] = searchTransit(network, [stops[0], stops[1], stops[3]]);
     const rides = result.steps.filter(step => step.kind === 'ride');
     expect(rides.map(ride => ride.stops.at(-1)?.name)).toEqual(['Peron tramvai', 'Sosire']);
+  });
+
+  it('calculează următoarele opriri și rezumatele liniilor pentru vehiculele live', () => {
+    const next = findNextVehicleStops(network, {
+      line: '4',
+      type: 'tram',
+      lat: 45.75,
+      lon: 21.181,
+      headsign: 'Centru',
+    });
+    expect(next).not.toBeNull();
+    expect(next?.upcoming.map(s => s.stop.name)).toContain('Peron tramvai');
+
+    const summaries = getLineSummaries(network);
+    expect(summaries.map(s => s.line)).toEqual(['4', 'E2']);
   });
 });

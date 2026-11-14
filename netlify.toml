@@ -11,6 +11,21 @@
   status = 200
 
 [[redirects]]
+  from = "/api/municipal-report-detail"
+  to = "/.netlify/functions/municipal-report-detail"
+  status = 200
+
+[[redirects]]
+  from = "/api/stpt-vehicles"
+  to = "/.netlify/functions/stpt-vehicles"
+  status = 200
+
+[[redirects]]
+  from = "/api/velo-stations"
+  to = "/.netlify/functions/velo-stations"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

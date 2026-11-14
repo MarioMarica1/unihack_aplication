@@ -1,5 +1,5 @@
 import type { DataDrivenPropertyValueSpecification, FilterSpecification, GeoJSONSource, Map } from 'maplibre-gl';
-import type { FeatureCollection, Point } from 'geojson';
+import type { FeatureCollection, LineString, Point, Position } from 'geojson';
 import { layerDefinitions } from './infrastructure';
 import type { Infrastructure, LayerVisibility } from './infrastructure';
 import { tramColors, withTramLabels } from './tram-lines';
@@ -16,13 +16,43 @@ const lineGroups = [
 ] as const;
 
 const tramLabels = 'mobility-tram-labels';
-const liveVehicles = 'stpt-live-vehicles';
+export const liveVehiclesLayerId = 'stpt-live-vehicles';
+export const liveVehiclesArrowLayerId = 'stpt-live-vehicles-arrow';
+const activeLineSourceId = 'active-transport-line-source';
+const activeLineStopsSourceId = 'active-transport-stops-source';
+const activeLineLayerIds = [
+  'active-transport-line-casing',
+  'active-transport-line',
+  'active-transport-line-arrows',
+  'active-transport-stops-circle',
+  'active-transport-stops-label',
+] as const;
 const busLabels = 'mobility-bus-labels';
 const casing = '#0f172a';
 
+export type ActiveLineRoute = {
+  line: string;
+  color: string;
+  direction: 'tur' | 'retur';
+  directionLabel: string;
+  shape: Position[];
+  stops: { name: string; lon: number; lat: number }[];
+};
+
 export function orderMobilityLayers(map: Map) {
   const lines = lineGroups.flatMap(([, id]) => [`${id}-casing`, `${id}-tag-casing`, id, `${id}-tag`]);
-  for (const id of [...lines, 'route-halo', 'route-line', ...transitLayerIds, busLabels, tramLabels, ...placeLayerIds, liveVehicles]) {
+  for (const id of [
+    ...lines,
+    ...activeLineLayerIds,
+    'route-halo',
+    'route-line',
+    ...transitLayerIds,
+    busLabels,
+    tramLabels,
+    ...placeLayerIds,
+    liveVehiclesLayerId,
+    liveVehiclesArrowLayerId,
+  ]) {
     if (map.getLayer(id)) map.moveLayer(id);
   }
 }
@@ -100,22 +130,203 @@ export function addMobilityLines(map: Map, infrastructure: Partial<Infrastructur
   return interactive;
 }
 
+function ensureDirectionIcons(map: Map) {
+  if (!map.hasImage('stpt-heading-arrow')) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    // Draw a directional chevron/arrow at top (North = 0 deg) outside the vehicle icon
+    ctx.fillStyle = '#0F52BA';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(32, 1);
+    ctx.lineTo(43, 15);
+    ctx.lineTo(35, 13);
+    ctx.lineTo(29, 13);
+    ctx.lineTo(21, 15);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    map.addImage('stpt-heading-arrow', ctx.getImageData(0, 0, 64, 64), { pixelRatio: 2 });
+  }
+
+  if (!map.hasImage('stpt-route-arrow')) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 32;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#0A192F';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(26, 16);
+    ctx.lineTo(8, 7);
+    ctx.lineTo(13, 16);
+    ctx.lineTo(8, 25);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    map.addImage('stpt-route-arrow', ctx.getImageData(0, 0, 32, 32), { pixelRatio: 2 });
+  }
+}
+
+export function updateActiveTransportLine(map: Map, activeRoute: ActiveLineRoute | null) {
+  ensureDirectionIcons(map);
+
+  if (!activeRoute || activeRoute.shape.length < 2) {
+    for (const id of activeLineLayerIds) {
+      if (map.getLayer(id)) map.removeLayer(id);
+    }
+    if (map.getSource(activeLineSourceId)) map.removeSource(activeLineSourceId);
+    if (map.getSource(activeLineStopsSourceId)) map.removeSource(activeLineStopsSourceId);
+    return;
+  }
+
+  const lineGeoJson: FeatureCollection<LineString> = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: {
+          line: activeRoute.line,
+          color: activeRoute.color,
+          direction: activeRoute.direction,
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: activeRoute.shape,
+        },
+      },
+    ],
+  };
+
+  const stopsGeoJson: FeatureCollection<Point> = {
+    type: 'FeatureCollection',
+    features: activeRoute.stops.map((st, idx) => ({
+      type: 'Feature',
+      properties: {
+        name: st.name,
+        index: idx + 1,
+        isTerminal: idx === 0 || idx === activeRoute.stops.length - 1,
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: [st.lon, st.lat],
+      },
+    })),
+  };
+
+  const lineSource = map.getSource<GeoJSONSource>(activeLineSourceId);
+  if (lineSource) {
+    lineSource.setData(lineGeoJson);
+  } else {
+    map.addSource(activeLineSourceId, { type: 'geojson', data: lineGeoJson });
+  }
+
+  const stopsSource = map.getSource<GeoJSONSource>(activeLineStopsSourceId);
+  if (stopsSource) {
+    stopsSource.setData(stopsGeoJson);
+  } else {
+    map.addSource(activeLineStopsSourceId, { type: 'geojson', data: stopsGeoJson });
+  }
+
+  if (!map.getLayer('active-transport-line-casing')) {
+    map.addLayer({
+      id: 'active-transport-line-casing',
+      source: activeLineSourceId,
+      type: 'line',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#0A192F', 'line-width': 9, 'line-opacity': 0.95 },
+    });
+  }
+
+  if (!map.getLayer('active-transport-line')) {
+    map.addLayer({
+      id: 'active-transport-line',
+      source: activeLineSourceId,
+      type: 'line',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': ['get', 'color'], 'line-width': 5.5, 'line-opacity': 1 },
+    });
+  } else {
+    map.setPaintProperty('active-transport-line', 'line-color', activeRoute.color);
+  }
+
+  if (!map.getLayer('active-transport-line-arrows')) {
+    map.addLayer({
+      id: 'active-transport-line-arrows',
+      source: activeLineSourceId,
+      type: 'symbol',
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 85,
+        'icon-image': 'stpt-route-arrow',
+        'icon-size': 0.9,
+        'icon-allow-overlap': true,
+        'icon-rotation-alignment': 'map',
+        'icon-keep-upright': false,
+      },
+    });
+  }
+
+  if (!map.getLayer('active-transport-stops-circle')) {
+    map.addLayer({
+      id: 'active-transport-stops-circle',
+      source: activeLineStopsSourceId,
+      type: 'circle',
+      paint: {
+        'circle-radius': ['case', ['get', 'isTerminal'], 6.5, 4.5],
+        'circle-color': '#ffffff',
+        'circle-stroke-color': activeRoute.color,
+        'circle-stroke-width': 2.5,
+      },
+    });
+  } else {
+    map.setPaintProperty('active-transport-stops-circle', 'circle-stroke-color', activeRoute.color);
+  }
+
+  if (!map.getLayer('active-transport-stops-label')) {
+    map.addLayer({
+      id: 'active-transport-stops-label',
+      source: activeLineStopsSourceId,
+      type: 'symbol',
+      minzoom: 13.5,
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-font': ['Noto Sans Bold'],
+        'text-size': 11,
+        'text-anchor': 'left',
+        'text-offset': [0.8, 0],
+        'text-optional': true,
+      },
+      paint: {
+        'text-color': '#0F172A',
+        'text-halo-color': '#ffffff',
+        'text-halo-width': 2,
+      },
+    });
+  }
+
+  orderMobilityLayers(map);
+}
+
 export function updateLiveVehicleLayer(map: Map, data: FeatureCollection<Point>) {
-  const source = map.getSource<GeoJSONSource>(liveVehicles);
+  ensureDirectionIcons(map);
+  const source = map.getSource<GeoJSONSource>(liveVehiclesLayerId);
   if (source) {
     source.setData(data);
     return;
   }
-  const colors: Record<LiveVehicleType, string> = { tram: '#7c3aed', bus: '#1d4ed8', trolleybus: '#0e7490' };
+  const colors: Record<LiveVehicleType, string> = { tram: '#7c3aed', bus: '#0F52BA', trolleybus: '#0e7490' };
   for (const [type, color] of Object.entries(colors)) {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 48;
     const context = canvas.getContext('2d')!;
     context.fillStyle = color;
     context.strokeStyle = 'white';
-    context.lineWidth = 2;
+    context.lineWidth = 2.5;
     context.beginPath();
-    context.roundRect(2, 2, 44, 44, 10);
+    context.roundRect(2, 2, 44, 44, 12);
     context.fill(); context.stroke();
     context.beginPath();
     context.roundRect(13, 13, 22, 20, 4);
@@ -128,18 +339,33 @@ export function updateLiveVehicleLayer(map: Map, data: FeatureCollection<Point>)
       context.moveTo(18, 13); context.lineTo(25, 7); context.lineTo(31, 13);
     }
     context.stroke();
-    map.addImage(`stpt-${type}`, context.getImageData(0, 0, 48, 48), { pixelRatio: 2 });
+    if (!map.hasImage(`stpt-${type}`)) {
+      map.addImage(`stpt-${type}`, context.getImageData(0, 0, 48, 48), { pixelRatio: 2 });
+    }
   }
-  map.addSource(liveVehicles, { type: 'geojson', data });
+  map.addSource(liveVehiclesLayerId, { type: 'geojson', data });
   map.addLayer({
-    id: liveVehicles, source: liveVehicles, type: 'symbol',
+    id: liveVehiclesLayerId, source: liveVehiclesLayerId, type: 'symbol',
     layout: {
       'icon-image': ['concat', 'stpt-', ['get', 'type']],
       'icon-allow-overlap': true, 'text-optional': true,
       'text-field': ['get', 'line'], 'text-anchor': 'top', 'text-offset': [0, 1],
-      'text-font': ['Noto Sans Bold'], 'text-size': 14, 'text-padding': 4,
+      'text-font': ['Noto Sans Bold'], 'text-size': 13, 'text-padding': 3,
     },
     paint: { 'text-color': '#ffffff', 'text-halo-color': casing, 'text-halo-width': 2 },
+  });
+  map.addLayer({
+    id: liveVehiclesArrowLayerId,
+    source: liveVehiclesLayerId,
+    type: 'symbol',
+    filter: ['==', ['get', 'hasBearing'], true],
+    layout: {
+      'icon-image': 'stpt-heading-arrow',
+      'icon-rotate': ['get', 'bearing'],
+      'icon-rotation-alignment': 'map',
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+    },
   });
   orderMobilityLayers(map);
 }

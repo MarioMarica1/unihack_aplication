@@ -16,9 +16,9 @@ function classify(tags) {
   if (tags.shop && !/^(vacant|no)$/.test(tags.shop)) return 'shop';
   if (tags.tourism === 'museum') return 'museum';
   if (tags.tourism || /^(theatre|cinema|arts_centre|community_centre)$/.test(tags.amenity || '')) return 'culture';
-  if (/^(bus_station|ferry_terminal|bicycle_rental|car_rental|fuel|charging_station)$/.test(tags.amenity || '')) return 'transport';
-  if (/^(townhall|courthouse|police|post_office|bank|place_of_worship|social_facility)$/.test(tags.amenity || '') || tags.office) return 'services';
   if (tags.amenity === 'bicycle_rental') return 'bike_rental';
+  if (/^(bus_station|ferry_terminal|car_rental|fuel|charging_station)$/.test(tags.amenity || '')) return 'transport';
+  if (/^(townhall|courthouse|police|post_office|bank|place_of_worship|social_facility)$/.test(tags.amenity || '') || tags.office) return 'services';
   if (tags.highway === 'bus_stop' || tags.bus === 'yes' || tags.trolleybus === 'yes') return 'bus_stop';
   if (tags.railway === 'tram_stop' || tags.public_transport === 'tram') return 'tram_stop';
   if (tags.healthcare) return 'health';

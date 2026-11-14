@@ -6,6 +6,11 @@
   NODE_VERSION = "24"
 
 [[redirects]]
+  from = "/api/municipal-reports"
+  to = "/.netlify/functions/municipal-reports"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

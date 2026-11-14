@@ -16,6 +16,8 @@ import { addMobilityLines, orderMobilityLayers, updateLiveVehicleLayer } from '.
 import type { LiveVehicle } from './stpt-live';
 import { clearTransitRoute, drawTransitRoute } from './transit-map';
 import type { TransitOption } from './transitRouter';
+import { municipalFeatureAt, openMunicipalFeature, showMunicipalReports } from './municipal-reports-map';
+import type { MunicipalReport } from './municipal-reports';
 
 type Props = {
   theme: Theme;
@@ -29,6 +31,7 @@ type Props = {
   transit?: TransitOption;
   mobilePanelOpen: boolean;
   liveVehicles: LiveVehicle[];
+  municipalReports?: MunicipalReport[];
   labels: boolean; mapFit: number; buildings: boolean; focusedPlace?: MapPlace;
   onInspectPlace: (place: MapPlace) => void; onInspectLine: (info: { title: string; description: string }) => void;
 };
@@ -51,6 +54,7 @@ export default function MapCanvas(props: Props) {
   const styleDeadline = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastFittedRoute = useRef<{ instance: maplibregl.Map; route: RouteResult | TransitOption; panelOpen: boolean } | undefined>(undefined);
   const hitLayers = useRef<string[]>([]);
+  const municipalPopup = useRef<maplibregl.Popup | undefined>(undefined);
   const [ready, setReady] = useState(0); const [settled, setSettled] = useState(false); const [error, setError] = useState(false); const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!container.current) return;
@@ -74,6 +78,14 @@ export default function MapCanvas(props: Props) {
     };
     instance.on('click', event => {
       if (latest.current.picking) { latest.current.onPick({ lon: +event.lngLat.lng.toFixed(6), lat: +event.lngLat.lat.toFixed(6) }); return; }
+      if (latest.current.municipalReports?.length) {
+        const feature = municipalFeatureAt(instance, event.point);
+        if (feature) {
+          municipalPopup.current?.remove();
+          municipalPopup.current = openMunicipalFeature(instance, feature, latest.current.municipalReports, appliedTheme.current === 'dark');
+          return;
+        }
+      }
       const layers = interactiveLayers(); if (!layers.length) return;
       const features = instance.queryRenderedFeatures([[event.point.x - 5, event.point.y - 5], [event.point.x + 5, event.point.y + 5]], { layers });
       const feature = features.find(f => f.geometry.type === 'Point') || features[0]; if (!feature) return;
@@ -105,6 +117,7 @@ export default function MapCanvas(props: Props) {
     instance.on('mousemove', event => {
       if (event.originalEvent.buttons) return;
       if (latest.current.picking) { instance.getCanvas().style.cursor = 'crosshair'; return; }
+      if (latest.current.municipalReports?.length && municipalFeatureAt(instance, event.point)) { instance.getCanvas().style.cursor = 'pointer'; return; }
       const layers = interactiveLayers(); instance.getCanvas().style.cursor = layers.length && instance.queryRenderedFeatures(event.point, { layers }).length ? 'pointer' : '';
     });
     const observer = new ResizeObserver(() => instance.resize()); observer.observe(container.current);
@@ -195,6 +208,13 @@ export default function MapCanvas(props: Props) {
       })),
     });
   }, [props.liveVehicles, ready]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !styleReady.current) return;
+    showMunicipalReports(instance, props.municipalReports ?? []);
+    return () => { municipalPopup.current?.remove(); municipalPopup.current = undefined; };
+  }, [props.municipalReports, ready]);
 
   useEffect(() => {
     const instance = map.current; if (!instance || !props.mapFit) return;

@@ -348,3 +348,15 @@
   .map-first .sidebar-content .community-intro h1 { font-size: 16px; white-space: nowrap; }
   .map-first .community-create { padding-inline: 7px; }
 }
+.municipal-reports-list { display: grid; gap: 10px; }
+.municipal-reports-list ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.municipal-reports-list li { display: grid; gap: 2px; font-size: 12px; }
+.municipal-reports-pages { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.municipal-report-popup { display: grid; gap: 4px; padding: 4px 10px 4px 0; }
+.municipal-report-popup a { color: var(--brand-blue); text-decoration: underline; }
+.municipal-popup-dark .maplibregl-popup-content { background: var(--night-surface); color: var(--night-text); }
+.municipal-popup-dark { --popup-color: var(--night-surface); }
+.municipal-popup-dark:is(.maplibregl-popup-anchor-top, .maplibregl-popup-anchor-top-left, .maplibregl-popup-anchor-top-right) .maplibregl-popup-tip { border-bottom-color: var(--popup-color); }
+.municipal-popup-dark:is(.maplibregl-popup-anchor-bottom, .maplibregl-popup-anchor-bottom-left, .maplibregl-popup-anchor-bottom-right) .maplibregl-popup-tip { border-top-color: var(--popup-color); }
+.municipal-popup-dark.maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--popup-color); }
+.municipal-popup-dark.maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--popup-color); }

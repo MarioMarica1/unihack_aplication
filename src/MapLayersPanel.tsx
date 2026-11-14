@@ -1,4 +1,4 @@
-import { Bike, Building2, Bus, Footprints, Layers, MapPinned, TrainFront } from 'lucide-react';
+import { Bike, Building2, Bus, Footprints, Layers, MapPinned, TrainFront, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { layerDefinitions } from './infrastructure';
 import type { LayerKey, LayerVisibility } from './infrastructure';
@@ -11,6 +11,7 @@ type Props = {
   buildings: boolean; setBuildings: (value: boolean) => void;
   tramRefs: string[];
   live: ReactNode;
+  municipal: { enabled: boolean; toggle: () => void; panel: ReactNode };
 };
 function Row({ name, description, checked, onChange, icon, color, count, disabled = false }: { name: string; description: string; checked: boolean; onChange: () => void; icon: ReactNode; color: string; count?: number; disabled?: boolean }) {
   return <label className={`layer-row ${checked ? 'on' : ''}`}>
@@ -20,7 +21,7 @@ function Row({ name, description, checked, onChange, icon, color, count, disable
     <span className="switch" aria-hidden="true"><i /></span>
   </label>;
 }
-export default function MapLayersPanel({ visibility, toggle, layers, buildings, setBuildings, tramRefs, live }: Props) {
+export default function MapLayersPanel({ visibility, toggle, layers, buildings, setBuildings, tramRefs, live, municipal }: Props) {
   const mobilityActive = visibility.cycleways || visibility.tramways || visibility.busways || visibility.sidewalks;
   return <div className="layer-panel">
     <div className="panel-intro"><h1>Straturi hartă</h1></div>
@@ -29,6 +30,8 @@ export default function MapLayersPanel({ visibility, toggle, layers, buildings, 
       <Row name="Locuri și servicii" description="Magazine, cafenele, școli, instituții" checked={visibility.places} onChange={() => toggle('places')} icon={<MapPinned size={18} />} color="#397e9a" />
       {visibility.places && layers.places.loading && <p className="layer-status" role="status">Se încarcă locurile…</p>}
       {visibility.places && layers.places.error && <div className="form-error" role="alert">{layers.places.error} <button onClick={layers.places.retry}>Reîncearcă</button></div>}
+      <Row name="Sesizări Primărie" description="Sesizări depuse și în lucru" checked={municipal.enabled} onChange={municipal.toggle} icon={<TriangleAlert size={18} />} color="#554593" />
+      {municipal.enabled && municipal.panel}
     </section>
     <section className="layer-group" aria-label="Straturi infrastructură"><h2>Mobilitate <span>STPT / PMT / OSM</span></h2>
       {(['cycleways','tramways','busways','sidewalks'] as const).map(key => <div key={key}><Row name={layerDefinitions[key].label} description={layerDefinitions[key].description} checked={visibility[key]} onChange={() => toggle(key)} icon={key === 'cycleways' ? <Bike size={18} /> : key === 'tramways' ? <TrainFront size={18} /> : key === 'busways' ? <Bus size={18} /> : <Footprints size={18} />} color={key === 'busways' ? layerDefinitions.busways.color : layerDefinitions[key].color} />{visibility[key] && layers[key].loading && <p className="layer-status" role="status">Se încarcă…</p>}{visibility[key] && layers[key].error && <div className="form-error" role="alert">{layers[key].error} <button onClick={layers[key].retry}>Reîncearcă</button></div>}</div>)}

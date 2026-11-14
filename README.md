@@ -22,6 +22,8 @@ npm.cmd run build
 npm.cmd run preview -- --port 5174
 ```
 
+In **Straturi hartă**, enable **Sesizări Primărie** to browse public reports marked **Depusă** or **În lucru** since 2022. Reports without coordinates are available in the list. While the layer is open, the last 30 days refresh every minute and older reports refresh hourly. Each entry links to the municipality's original report. Vite and Netlify provide the same read-only adapter at `/api/municipal-reports`.
+
 ## What the demo does
 
 - Live MapLibre/OpenFreeMap Liberty map of Timișoara. Desktop opens on the community list. On mobile, one bottom panel switches between tools and pin details and leaves map controls accessible.

@@ -420,64 +420,81 @@ export default function MapCanvas(props: Props) {
     });
   }, [props.selectedVeloStation?.id, attempt]);
 
-  // Official Municipal & Cultural Event Markers on the map (with radial offset for shared venues)
+  // Official Municipal & Cultural Event Markers grouped & anchored cleanly on exact venue buildings
   useEffect(() => {
     const instance = map.current;
     if (!instance || !props.cityEvents?.length) return;
+
     const venueGroups = new Map<string, OfficialCityEvent[]>();
     for (const ev of props.cityEvents) {
-      const key = `${ev.lon.toFixed(4)},${ev.lat.toFixed(4)}`;
+      const key = `${ev.lon.toFixed(5)},${ev.lat.toFixed(5)}`;
       const list = venueGroups.get(key) ?? [];
       list.push(ev);
       venueGroups.set(key, list);
     }
 
-    const markers = props.cityEvents.map(ev => {
-      const key = `${ev.lon.toFixed(4)},${ev.lat.toFixed(4)}`;
-      const siblings = venueGroups.get(key) ?? [ev];
-      const indexInVenue = siblings.indexOf(ev);
-      let lon = ev.lon;
-      let lat = ev.lat;
-      if (siblings.length > 1 && indexInVenue > 0) {
-        const angle = (2 * Math.PI * indexInVenue) / siblings.length;
-        const ring = 1 + Math.floor((indexInVenue - 1) / 8) * 0.65;
-        lon += Math.cos(angle) * 0.00034 * ring;
-        lat += Math.sin(angle) * 0.00024 * ring;
-      }
+    const formatEventDate = (iso: string) => iso.slice(5, 10).split('-').reverse().join('.');
+
+    const markers = [...venueGroups.values()].map(siblings => {
+      const selectedInVenue = siblings.find(ev => ev.id === props.selectedCityEvent?.id);
+      const primaryEv = selectedInVenue ?? siblings[0];
 
       const button = document.createElement('button');
       button.type = 'button';
-      const isSelected = props.selectedCityEvent?.id === ev.id;
-      button.className = `city-event-map-marker ${isSelected ? 'selected' : ''}`;
-      const dateStr = ev.startsAt.slice(5, 10).split('-').reverse().join('.');
-      button.title = `${ev.title} (${dateStr}${ev.timeLabel ? ` · ${ev.timeLabel}` : ''}) — ${ev.venue}`;
+      const isSelected = Boolean(selectedInVenue);
+      button.className = `city-event-map-marker ${isSelected ? 'selected' : ''} ${siblings.length > 1 ? 'multi-event' : ''}`;
+      const dateStr = formatEventDate(primaryEv.startsAt);
+      button.title =
+        siblings.length > 1
+          ? `${primaryEv.venue}: ${siblings.length} evenimente (${primaryEv.title})`
+          : `${primaryEv.title} (${dateStr}${primaryEv.timeLabel ? ` · ${primaryEv.timeLabel}` : ''}) — ${primaryEv.venue}`;
       button.setAttribute('aria-label', button.title);
 
       const badge = document.createElement('span');
       badge.className = 'city-event-marker-badge';
       badge.innerHTML =
-        '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z"/><path d="m8 15 2 2 5-5"/></svg>';
+        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z"/><path d="m8 15 2 2 5-5"/></svg>';
 
       const dateChip = document.createElement('span');
       dateChip.className = 'city-event-marker-date';
-      dateChip.textContent = dateStr;
+      dateChip.textContent =
+        siblings.length > 1 ? `${dateStr} · +${siblings.length - 1}` : dateStr;
 
       const copy = document.createElement('span');
       copy.className = 'city-event-marker-copy';
       const dateTag = document.createElement('small');
-      dateTag.textContent = `${dateStr}${ev.timeLabel ? ` · ${ev.timeLabel}` : ''} · ${ev.venue}`;
+      dateTag.textContent =
+        siblings.length > 1
+          ? `${siblings.length} evenimente · ${primaryEv.venue}`
+          : `${dateStr}${primaryEv.timeLabel ? ` · ${primaryEv.timeLabel}` : ''} · ${primaryEv.venue}`;
       const titleTag = document.createElement('strong');
-      titleTag.textContent = ev.title.length > 42 ? `${ev.title.slice(0, 40)}…` : ev.title;
+      titleTag.textContent = primaryEv.title.length > 48 ? `${primaryEv.title.slice(0, 46)}…` : primaryEv.title;
       copy.append(dateTag, titleTag);
+
+      if (siblings.length > 1) {
+        const extraList = document.createElement('span');
+        extraList.className = 'city-event-marker-extra';
+        const others = siblings.filter(ev => ev.id !== primaryEv.id).slice(0, 2);
+        extraList.textContent =
+          others.map(ev => `• ${formatEventDate(ev.startsAt)}: ${ev.title.slice(0, 32)}${ev.title.length > 32 ? '…' : ''}`).join('\n') +
+          (siblings.length > 3 ? `\n+ încă ${siblings.length - 3} la această locație` : '');
+        copy.append(extraList);
+      }
 
       button.append(badge, dateChip, copy);
       button.addEventListener('click', clickEv => {
         clickEv.stopPropagation();
-        latest.current.onSelectCityEvent?.(ev);
+        if (siblings.length === 1) {
+          latest.current.onSelectCityEvent?.(siblings[0]);
+          return;
+        }
+        const currentIdx = selectedInVenue ? siblings.findIndex(ev => ev.id === selectedInVenue.id) : -1;
+        const nextEv = siblings[(currentIdx + 1) % siblings.length];
+        latest.current.onSelectCityEvent?.(nextEv);
       });
 
-      return new maplibregl.Marker({ element: button, anchor: 'center' })
-        .setLngLat([lon, lat])
+      return new maplibregl.Marker({ element: button, anchor: 'bottom', offset: [0, -7] })
+        .setLngLat([primaryEv.lon, primaryEv.lat])
         .addTo(instance);
     });
     return () => markers.forEach(marker => marker.remove());

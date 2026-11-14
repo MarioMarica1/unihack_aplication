@@ -2439,17 +2439,34 @@
 
 /* Official City Event Markers & Cards */
 .city-event-map-marker {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 8px 3px 4px;
+  padding: 3px 9px 3px 4px;
   border-radius: 999px;
   background: #0F52BA;
   border: 2px solid #ffffff;
-  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.28);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.3);
   color: #ffffff;
   text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.city-event-map-marker::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 7px solid #ffffff;
+  filter: drop-shadow(0 2px 2px rgba(15, 23, 42, 0.25));
 }
 .city-event-map-marker:hover,
 .city-event-map-marker.selected {
@@ -2457,6 +2474,16 @@
   border-color: #ffffff;
   box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.28), 0 6px 16px rgba(15, 23, 42, 0.36);
   z-index: 15;
+}
+.city-event-marker-extra {
+  display: block;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 9.5px;
+  line-height: 1.35;
+  color: #475569;
+  white-space: pre-line;
 }
 .city-event-marker-badge {
   width: 22px;

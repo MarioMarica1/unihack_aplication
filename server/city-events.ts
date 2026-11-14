@@ -23,26 +23,34 @@ const timisoaraVenues: Array<{
   lat: number;
   lon: number;
 }> = [
-  { pattern: /filarmonic|capitol|simfonic|orchestr|recital|vioar|pian/i, venue: 'Filarmonica Banatul (Sala Capitol)', lat: 45.75162, lon: 21.22614 },
-  { pattern: /oper[aă]|teatru|național|national|dramatic|german|maghiar/i, venue: 'Opera Națională / Teatrul Național (Piața Victoriei)', lat: 45.75412, lon: 21.22582 },
-  { pattern: /faber|cinci hectare|ambasada|splaiul peneș/i, venue: 'FABER Timișoara (Splaiul Peneș Curcanul)', lat: 45.75632, lon: 21.24681 },
-  { pattern: /victoria|cinema victoria|bălcescu/i, venue: 'Cinema Victoria (Piața Bălcescu)', lat: 45.74784, lon: 21.20824 },
-  { pattern: /cinema timiș|cinema timis/i, venue: 'Cinema Timiș (Piața Victoriei)', lat: 45.75341, lon: 21.22563 },
-  { pattern: /cinema studio/i, venue: 'Cinema Studio (Str. Nicolinț)', lat: 45.75561, lon: 21.22592 },
-  { pattern: /bastion|theresia|muzeul național al banatului/i, venue: 'Bastionul Maria Theresia', lat: 45.75692, lon: 21.23364 },
-  { pattern: /unirii|muzeul de artă|baroc|sârb|tambure|literatur/i, venue: 'Piața Unirii / Muzeul Național de Artă', lat: 45.75795, lon: 21.22892 },
-  { pattern: /libertății|libertatii|garnizoan|galeria 5/i, venue: 'Piața Libertății / Galeria 5', lat: 45.75562, lon: 21.22725 },
-  { pattern: /rozelor|parc/i, venue: 'Parcul Rozelor Timișoara', lat: 45.74951, lon: 21.23142 },
-  { pattern: /iulius|congress/i, venue: 'Iulius Town Timișoara', lat: 45.76612, lon: 21.22864 },
+  { pattern: /filarmonic|capitol|simfonic|orchestr|recital|vioar|pian|cvartet/i, venue: 'Filarmonica Banatul (Sala Capitol)', lat: 45.75056, lon: 21.22622 },
+  { pattern: /oper[aă]|teatru|național|national|dramatic|german|maghiar/i, venue: 'Opera Națională / Teatrul Național (Piața Victoriei)', lat: 45.75439, lon: 21.22606 },
+  { pattern: /faber|cinci hectare|splaiul peneș|ambasada/i, venue: 'FABER Timișoara (Splaiul Peneș Curcanul 4-5)', lat: 45.76139, lon: 21.25158 },
+  { pattern: /karl\s*kunz|palatul\s*kunz|3\s*august/i, venue: 'Palatul Karl Kunz (Bd. 3 August 1919 nr. 2)', lat: 45.75629, lon: 21.24465 },
+  { pattern: /victoria|cinema victoria|bălcescu/i, venue: 'Cinema Victoria (Piața Bălcescu)', lat: 45.74131, lon: 21.22453 },
+  { pattern: /cinema timiș|cinema timis/i, venue: 'Cinema Timiș (Piața Victoriei 7)', lat: 45.75152, lon: 21.22551 },
+  { pattern: /cinema studio|nikolaus lenau/i, venue: 'Cinema Studio (Str. Nikolaus Lenau 2)', lat: 45.75243, lon: 21.22604 },
+  { pattern: /galeria\s*helios/i, venue: 'Galeria Helios (Piața Victoriei 6)', lat: 45.75201, lon: 21.22445 },
+  { pattern: /bastion|theresia|therezia|muzeul național al banatului/i, venue: 'Bastionul Maria Theresia (Str. Martin Luther 4)', lat: 45.75693, lon: 21.23461 },
+  { pattern: /unirii|muzeul de artă|baroc|sârb|tambure/i, venue: 'Piața Unirii / Muzeul Național de Artă', lat: 45.75723, lon: 21.22908 },
+  { pattern: /libertății|libertatii|garnizoan|galeria 5/i, venue: 'Piața Libertății / Galeria 5', lat: 45.75568, lon: 21.22730 },
+  { pattern: /sinagog/i, venue: 'Sinagoga din Cetate (Str. Mărășești 6)', lat: 45.75647, lon: 21.22613 },
+  { pattern: /rozelor|parcul rozelor/i, venue: 'Parcul Rozelor Timișoara', lat: 45.74999, lon: 21.23239 },
+  { pattern: /iulius|congress/i, venue: 'Iulius Town Timișoara', lat: 45.76638, lon: 21.22839 },
 ];
 
-const fallbackCulturalVenues = [
-  { venue: 'Centrul de Proiecte Timișoara (Str. Vasile Alecsandri 1)', lat: 45.75614, lon: 21.22782 },
-  { venue: 'Piața Libertății Timișoara', lat: 45.75562, lon: 21.22725 },
-  { venue: 'Piața Unirii Timișoara', lat: 45.75795, lon: 21.22892 },
-  { venue: 'Bastionul Maria Theresia', lat: 45.75692, lon: 21.23364 },
-  { venue: 'Cinema Timiș (Piața Victoriei)', lat: 45.75341, lon: 21.22563 },
-];
+const defaultSourceVenues = {
+  visitTimisoara: {
+    venue: 'Centrul de Informare Turistică / Piața Victoriei (Str. Alba Iulia 2)',
+    lat: 45.75444,
+    lon: 21.22652,
+  },
+  centrulDeProiecte: {
+    venue: 'Centrul de Proiecte Timișoara (Str. Vasile Alecsandri 1)',
+    lat: 45.75627,
+    lon: 21.22777,
+  },
+} as const;
 
 function decodeHtmlEntities(input: string): string {
   return input
@@ -57,12 +65,16 @@ function decodeHtmlEntities(input: string): string {
     .trim();
 }
 
-function resolveVenue(title: string, externalLink: string, index: number) {
+function resolveVenue(
+  title: string,
+  externalLink: string,
+  sourceKind: keyof typeof defaultSourceVenues,
+) {
   const hay = `${title} ${externalLink}`;
   for (const v of timisoaraVenues) {
     if (v.pattern.test(hay)) return v;
   }
-  return fallbackCulturalVenues[index % fallbackCulturalVenues.length];
+  return defaultSourceVenues[sourceKind];
 }
 
 function classifyEventCategory(classList: string[] = [], title = ''): string {
@@ -115,7 +127,7 @@ async function fetchLiveCityEvents(): Promise<{ events: OfficialCityEvent[]; fet
 
       const webLink = String(item.meta?.link_website_event || link);
       const ticketsUrl = item.meta?.link_tickets_event ? String(item.meta.link_tickets_event) : undefined;
-      const venueInfo = resolveVenue(title, `${webLink} ${ticketsUrl ?? ''}`, events.length);
+      const venueInfo = resolveVenue(title, `${webLink} ${ticketsUrl ?? ''}`, 'visitTimisoara');
 
       events.push({
         id: `vt-${item.id ?? events.length}`,
@@ -142,7 +154,7 @@ async function fetchLiveCityEvents(): Promise<{ events: OfficialCityEvent[]; fet
 
       const link = String(item.link ?? 'https://centruldeproiecte.ro/');
       const startsAt = item.date ? new Date(item.date).toISOString() : new Date().toISOString();
-      const venueInfo = resolveVenue(title, link, events.length);
+      const venueInfo = resolveVenue(title, link, 'centrulDeProiecte');
 
       events.push({
         id: `cdp-${item.id ?? events.length}`,

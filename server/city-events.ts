@@ -1,4 +1,9 @@
-import type { OfficialCityEvent } from '../src/city-events.ts';
+import {
+  filterAndSortActiveCityEvents,
+  getBucharestDateKey,
+  isCityEventExpired,
+  type OfficialCityEvent,
+} from '../src/city-events-utils.ts';
 
 type WpEventItem = {
   id?: number;
@@ -15,6 +20,19 @@ type WpEventItem = {
   };
 };
 
+type ParsedCdpCard = {
+  title: string;
+  categoryRaw: string;
+  venueRaw: string;
+  officialUrl: string;
+  startsAt: string;
+  endsAt?: string;
+  timeLabel?: string;
+};
+
+const CDP_CALENDAR_URL = 'https://centruldeproiecte.ro/calendar/';
+const VT_EVENTS_URL = 'https://visit-timisoara.com/wp-json/wp/v2/events-visit?per_page=100';
+
 let cache: { until: number; promise: Promise<{ events: OfficialCityEvent[]; fetchedAt: string }> } | undefined;
 
 const timisoaraVenues: Array<{
@@ -24,18 +42,25 @@ const timisoaraVenues: Array<{
   lon: number;
 }> = [
   { pattern: /filarmonic|capitol|simfonic|orchestr|recital|vioar|pian|cvartet/i, venue: 'Filarmonica Banatul (Sala Capitol)', lat: 45.75056, lon: 21.22622 },
-  { pattern: /oper[aă]|teatru|național|national|dramatic|german|maghiar/i, venue: 'Opera Națională / Teatrul Național (Piața Victoriei)', lat: 45.75439, lon: 21.22606 },
+  { pattern: /oper[aă]|teatru[l]?\s+na[țt]ional|dramatic|german|maghiar/i, venue: 'Opera Națională / Teatrul Național (Piața Victoriei)', lat: 45.75439, lon: 21.22606 },
   { pattern: /faber|cinci hectare|splaiul peneș|ambasada/i, venue: 'FABER Timișoara (Splaiul Peneș Curcanul 4-5)', lat: 45.76139, lon: 21.25158 },
   { pattern: /karl\s*kunz|palatul\s*kunz|3\s*august/i, venue: 'Palatul Karl Kunz (Bd. 3 August 1919 nr. 2)', lat: 45.75629, lon: 21.24465 },
   { pattern: /victoria|cinema victoria|bălcescu/i, venue: 'Cinema Victoria (Piața Bălcescu)', lat: 45.74131, lon: 21.22453 },
   { pattern: /cinema timiș|cinema timis/i, venue: 'Cinema Timiș (Piața Victoriei 7)', lat: 45.75152, lon: 21.22551 },
   { pattern: /cinema studio|nikolaus lenau/i, venue: 'Cinema Studio (Str. Nikolaus Lenau 2)', lat: 45.75243, lon: 21.22604 },
+  { pattern: /cinema johnny/i, venue: 'Cinema Johnny Timișoara', lat: 45.73325, lon: 21.19092 },
   { pattern: /galeria\s*helios/i, venue: 'Galeria Helios (Piața Victoriei 6)', lat: 45.75201, lon: 21.22445 },
-  { pattern: /bastion|theresia|therezia|martin luther|hector|muzeul național al banatului/i, venue: 'Bastionul Maria Theresia (Str. Hector nr. 1)', lat: 45.75678, lon: 21.23423 },
+  { pattern: /bastion|theresia|therezia|martin luther|hector|indecis|habitat\s*b1|muzeul național al banatului/i, venue: 'Bastionul Maria Theresia (Str. Hector nr. 1)', lat: 45.75678, lon: 21.23423 },
   { pattern: /corneliu\s*miklo[sș]|take\s*ionescu\s*83|\bmx\b/i, venue: 'MX | Muzeul Corneliu Mikloși (Bd. Take Ionescu 83)', lat: 45.76300, lon: 21.24588 },
   { pattern: /unirii|muzeul de artă|baroc|sârb|tambure/i, venue: 'Piața Unirii / Muzeul Național de Artă', lat: 45.75723, lon: 21.22908 },
   { pattern: /galeria\s*5|vasile alecsandri|centrul de proiecte/i, venue: 'Centrul de Proiecte / Galeria 5 (Str. Vasile Alecsandri nr. 1)', lat: 45.75627, lon: 21.22777 },
   { pattern: /libertății|libertatii|garnizoan/i, venue: 'Piața Libertății Timișoara', lat: 45.75568, lon: 21.22730 },
+  { pattern: /c[ăa]rture[șs]ti\s*mercy|str\.?\s*(?:florimund\s*)?mercy/i, venue: 'Librăria Cărturești Mercy (Str. Florimund Mercy 7)', lat: 45.75672, lon: 21.22884 },
+  { pattern: /casa tineretului|arie[șs]\s*19/i, venue: 'Casa Tineretului (Str. Arieș 19)', lat: 45.74166, lon: 21.23926 },
+  { pattern: /universitatea de vest|\buvt\b/i, venue: 'Universitatea de Vest din Timișoara', lat: 45.74723, lon: 21.23129 },
+  { pattern: /jecza/i, venue: 'Fundația / Galeria Jecza (Calea Martirilor 51/52-54)', lat: 45.72786, lon: 21.23794 },
+  { pattern: /c\.?\s*d\.?\s*loga|diaconovici\s*loga/i, venue: 'Colegiul Național C. D. Loga (Bd. C. D. Loga 37)', lat: 45.75302, lon: 21.23425 },
+  { pattern: /emanuil\s*ungureanu|miron\s*costin/i, venue: 'Colegiul Tehnic Emanuil Ungureanu (Piața Iancu Huniade 3)', lat: 45.75211, lon: 21.22814 },
   { pattern: /sinagog/i, venue: 'Sinagoga din Cetate (Str. Mărășești 6)', lat: 45.75647, lon: 21.22613 },
   { pattern: /rozelor|parcul rozelor/i, venue: 'Parcul Rozelor Timișoara', lat: 45.74999, lon: 21.23239 },
   { pattern: /iulius|congress/i, venue: 'Iulius Town Timișoara', lat: 45.76638, lon: 21.22839 },
@@ -54,15 +79,39 @@ const defaultSourceVenues = {
   },
 } as const;
 
-function decodeHtmlEntities(input: string): string {
+const namedHtmlEntities: Record<string, string> = {
+  nbsp: ' ',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  ndash: '–',
+  mdash: '—',
+  hellip: '…',
+  acirc: 'â',
+  Acirc: 'Â',
+  icirc: 'î',
+  Icirc: 'Î',
+  bdquo: '„',
+  ldquo: '“',
+  rdquo: '”',
+  lsquo: '‘',
+  rsquo: '’',
+};
+
+export function decodeHtmlEntities(input: string): string {
   return input
-    .replace(/&#8211;|&ndash;/g, '–')
-    .replace(/&#8212;|&mdash;/g, '—')
-    .replace(/&#8220;|&#8221;|&ldquo;|&rdquo;/g, '"')
-    .replace(/&#8216;|&#8217;|&#039;|&rsquo;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/<[^>]+>/g, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => {
+      const code = Number.parseInt(hex, 16);
+      return Number.isInteger(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
+    })
+    .replace(/&#(\d+);/g, (_, dec: string) => {
+      const code = Number.parseInt(dec, 10);
+      return Number.isInteger(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
+    })
+    .replace(/&([a-z]+);/gi, (full, name: string) => namedHtmlEntities[name] ?? full)
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -84,23 +133,58 @@ const romanianMonths: Record<string, number> = {
   decembrie: 12,
 };
 
-function parseRomanianDateIso(snippet: string): { startsAt?: string; endsAt?: string } {
-  const m = snippet.match(
-    /(\d{1,2})(?:\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie))?(?:\s*[–-]\s*(\d{1,2}))?\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie)\s+(\d{4})/i,
+/**
+ * Parses single dates ("15 noiembrie 2026 , 18:00"), same-month ranges ("13–16 noiembrie 2026"),
+ * multi-month ranges ("24 septembrie – 15 noiembrie 2026"), and cross-year ranges
+ * ("6 noiembrie 2026 – 30 ianuarie 2027") into UTC midnight calendar ISO bounds + timeLabel.
+ */
+export function parseRomanianDateRangeIso(snippet: string): {
+  startsAt?: string;
+  endsAt?: string;
+  timeLabel?: string;
+} {
+  const clean = decodeHtmlEntities(snippet);
+  const m = clean.match(
+    /(\d{1,2})(?:\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie))?(?:\s+(\d{4}))?(?:\s*[–-]\s*(\d{1,2})(?:\s+(ianuarie|februarie|martie|aprilie|mai|iunie|iulie|august|septembrie|octombrie|noiembrie|decembrie))?\s+(\d{4}))?(?:\s*,?\s*(\d{1,2}:\d{2}(?:\s*[–-]\s*\d{1,2}:\d{2})?))?/i,
   );
   if (!m) return {};
+
   const dayStart = Number(m[1]);
-  const monthStartName = (m[2] || m[4] || '').toLowerCase();
-  const dayEnd = m[3] ? Number(m[3]) : undefined;
-  const monthEndName = (m[4] || '').toLowerCase();
+  const monthStartName = (m[2] || m[5] || '').toLowerCase();
   const monthStart = romanianMonths[monthStartName];
-  const monthEnd = romanianMonths[monthEndName];
-  const year = Number(m[5]);
-  if (!monthStart || !monthEnd || !year) return {};
+  const startYear = Number(m[3] || m[6]);
+
+  if (!monthStart || !startYear || dayStart < 1 || dayStart > 31) return {};
+
   const pad = (n: number) => String(n).padStart(2, '0');
-  const startsAt = `${year}-${pad(monthStart)}-${pad(dayStart)}T10:00:00.000Z`;
-  const endsAt = dayEnd ? `${year}-${pad(monthEnd)}-${pad(dayEnd)}T20:00:00.000Z` : undefined;
-  return { startsAt, endsAt };
+  const startsAt = `${startYear}-${pad(monthStart)}-${pad(dayStart)}T00:00:00.000Z`;
+
+  let endsAt: string | undefined;
+  if (m[4]) {
+    const dayEnd = Number(m[4]);
+    const monthEndName = (m[5] || m[2] || '').toLowerCase();
+    const monthEnd = romanianMonths[monthEndName];
+    const endYear = Number(m[6] || m[3]);
+    if (monthEnd && endYear && dayEnd >= 1 && dayEnd <= 31) {
+      endsAt = `${endYear}-${pad(monthEnd)}-${pad(dayEnd)}T00:00:00.000Z`;
+    }
+  }
+
+  const timeLabel = m[7] ? m[7].replace(/\s*-\s*/g, ' – ').replace(/\s+/g, ' ').trim() : undefined;
+  return { startsAt, endsAt, timeLabel };
+}
+
+function buildNominatimQuery(venueRaw: string): string {
+  const addressPart = venueRaw.split(',')[0]?.trim() || venueRaw;
+  const preferred = /,/.test(venueRaw) && /\b(str|strada|bd|blv|bulevardul|splaiul|calea|piata|piața|nr)\b/i.test(venueRaw)
+    ? venueRaw
+    : addressPart;
+  return preferred
+    .replace(/\bSAD\s*\d+\b/gi, '')
+    .replace(/,\s*timi[șs]oara/gi, '')
+    .replace(/,\s*nr\.?/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 async function geocodeTimisoaraStreet(address: string): Promise<{ lat: number; lon: number } | null> {
@@ -108,11 +192,16 @@ async function geocodeTimisoaraStreet(address: string): Promise<{ lat: number; l
   if (!key) return null;
   if (streetCoordsCache.has(key)) return streetCoordsCache.get(key) ?? null;
 
-  const clean = address.replace(/\bSAD\s*\d+\b/gi, '').replace(/,\s*nr\.?/gi, ' ').trim();
+  const clean = buildNominatimQuery(address);
+  if (clean.length < 4) {
+    streetCoordsCache.set(key, null);
+    return null;
+  }
+
   try {
     const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&viewbox=21.14,45.82,21.32,45.69&bounded=1&q=${encodeURIComponent(`${clean}, Timișoara`)}`;
     const res = await fetch(url, {
-      signal: AbortSignal.timeout(2500),
+      signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'UrbanConect/1.0' },
     });
     if (!res.ok) {
@@ -134,36 +223,39 @@ async function geocodeTimisoaraStreet(address: string): Promise<{ lat: number; l
   return null;
 }
 
-async function fetchCdpEventMetadata(link: string): Promise<{
-  venueName?: string;
-  streetAddress?: string;
-  startsAt?: string;
-  endsAt?: string;
-}> {
-  const pageUrl = link.replace('/eveniment/', '/evenimente/');
-  try {
-    const res = await fetch(pageUrl, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) return {};
-    const html = await res.text();
-    const spaceMatch = html.match(/https:\/\/centruldeproiecte\.ro\/spatii\/[^"']+["'][^>]*>([^<]+)/i);
-    const streetMatch = html.match(/https:\/\/maps\.app\.goo\.gl\/[^"']+["'][^>]*>(?:<span[^>]*>)?([^<]+)/i);
-    const hostedIdx = html.indexOf('text_block-238-34608');
-    const dateSnippet =
-      hostedIdx > 0
-        ? html
-            .slice(Math.max(0, hostedIdx - 600), hostedIdx)
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/\s+/g, ' ')
-        : '';
-    const parsedDates = parseRomanianDateIso(dateSnippet);
-    return {
-      venueName: spaceMatch?.[1] ? decodeHtmlEntities(spaceMatch[1]) : undefined,
-      streetAddress: streetMatch?.[1] ? decodeHtmlEntities(streetMatch[1]) : undefined,
-      ...parsedDates,
-    };
-  } catch {
-    return {};
+export function parseCdpCalendarHtml(html: string): ParsedCdpCard[] {
+  const listStart = html.indexOf('id="_dynamic_list-4-8525"');
+  if (listStart < 0) return [];
+  const sectionEnd = html.indexOf('</section>', listStart);
+  const section = html.slice(listStart, sectionEnd > listStart ? sectionEnd : undefined);
+  const rawCards = section.split(/id="div_block-5-8525-\d+"/).slice(1);
+
+  const parsed: ParsedCdpCard[] = [];
+  for (const card of rawCards) {
+    const titleMatch = card.match(/data-id="span-138-8525"[^>]*>([\s\S]*?)<\/span>/i);
+    const title = decodeHtmlEntities(titleMatch?.[1] ?? '');
+    if (!title) continue;
+
+    const dateBlockMatch = card.match(/data-id="div_block-129-8525"[^>]*>([\s\S]*?)<\/div>\s*<h1/i);
+    const dateParsed = parseRomanianDateRangeIso(dateBlockMatch?.[1] ?? '');
+    if (!dateParsed.startsAt) continue;
+
+    const catMatch = card.match(/data-id="code_block-149-8525"[^>]*>([\s\S]*?)<\/div>/i);
+    const venueMatch = card.match(/data-id="span-140-8525"[^>]*>([\s\S]*?)<\/span>/i);
+    const aTag = card.match(/<a[^>]*data-id="link-141-8525"[^>]*>/i)?.[0] ?? '';
+    const hrefMatch = aTag.match(/href="([^"]+)"/i);
+
+    parsed.push({
+      title,
+      categoryRaw: decodeHtmlEntities(catMatch?.[1] ?? ''),
+      venueRaw: decodeHtmlEntities(venueMatch?.[1] ?? ''),
+      officialUrl: (hrefMatch?.[1] ?? CDP_CALENDAR_URL).replace(/&amp;/g, '&').trim(),
+      startsAt: dateParsed.startsAt,
+      endsAt: dateParsed.endsAt,
+      timeLabel: dateParsed.timeLabel,
+    });
   }
+  return parsed;
 }
 
 function resolveVenue(
@@ -178,53 +270,91 @@ function resolveVenue(
   return defaultSourceVenues[sourceKind];
 }
 
-function classifyEventCategory(classList: string[] = [], title = ''): string {
-  const hay = `${classList.join(' ')} ${title}`.toLocaleLowerCase('ro');
+function classifyEventCategory(hints: string[] = [], title = ''): string {
+  const hay = `${hints.join(' ')} ${title}`.toLocaleLowerCase('ro');
   if (/concert|muzic|filarmonic|simfonic|recital/.test(hay)) return 'Concert & Muzică';
-  if (/expozitie|expoziție|vernisaj|artă|arta|galeri/.test(hay)) return 'Expoziție & Arte Vizuale';
-  if (/teatru|spectacol|lectură|literatur|carte/.test(hay)) return 'Teatru & Literatură';
-  if (/film|cinema|proiecție/.test(hay)) return 'Film & Cinema';
+  if (/expozi[tț]ie|vernisaj|art[aă]|galeri|instala[tț]ie/.test(hay)) return 'Expoziție & Arte Vizuale';
+  if (/teatru|spectacol|lectur[aă]|literatur|carte|performance/.test(hay)) return 'Teatru & Literatură';
+  if (/film|cinema|proiec[tț]ie/.test(hay)) return 'Film & Cinema';
   return 'Eveniment Cultural & Comunitar';
 }
 
-async function fetchLiveCityEvents(): Promise<{ events: OfficialCityEvent[]; fetchedAt: string }> {
+function normalizeTitleTokens(title: string): string {
+  return title
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function primaryTitleSegment(title: string): string {
+  const head = title.split(/\s*[|–—]\s*|\s+-\s+/)[0] ?? title;
+  return normalizeTitleTokens(head);
+}
+
+function findDuplicateEvent<T extends { title: string; startsAt: string }>(
+  items: readonly T[],
+  title: string,
+  startsAt: string,
+): T | undefined {
+  const dayKey = getBucharestDateKey(startsAt);
+  const norm = normalizeTitleTokens(title);
+  const head = primaryTitleSegment(title);
+  if (!norm) return undefined;
+
+  return items.find(ev => {
+    if (getBucharestDateKey(ev.startsAt) !== dayKey) return false;
+    const prevNorm = normalizeTitleTokens(ev.title);
+    if (prevNorm === norm) return true;
+    if (prevNorm.length >= 12 && norm.length >= 12 && (prevNorm.includes(norm) || norm.includes(prevNorm))) {
+      return true;
+    }
+    const prevHead = primaryTitleSegment(ev.title);
+    return prevHead.length >= 14 && head.length >= 14 && prevHead === head;
+  });
+}
+
+function unixSecondsToIsoDate(raw: number | string | undefined): string | undefined {
+  const sec = Number(raw ?? 0);
+  if (!Number.isFinite(sec) || sec <= 1_000_000_000) return undefined;
+  return new Date(sec * 1000).toISOString();
+}
+
+async function fetchLiveCityEvents(now = new Date()): Promise<{ events: OfficialCityEvent[]; fetchedAt: string }> {
   const [vtRes, cdpRes] = await Promise.allSettled([
-    fetch('https://visit-timisoara.com/wp-json/wp/v2/events-visit?per_page=25', {
+    fetch(VT_EVENTS_URL, {
       signal: AbortSignal.timeout(10_000),
       headers: { Accept: 'application/json' },
     }).then(r => (r.ok ? (r.json() as Promise<WpEventItem[]>) : [])),
-    fetch('https://centruldeproiecte.ro/wp-json/wp/v2/eveniment?per_page=15', {
+    fetch(CDP_CALENDAR_URL, {
       signal: AbortSignal.timeout(10_000),
-      headers: { Accept: 'application/json' },
-    }).then(r => (r.ok ? (r.json() as Promise<WpEventItem[]>) : [])),
+      headers: { Accept: 'text/html' },
+    }).then(r => (r.ok ? r.text() : '')),
   ]);
 
   const events: OfficialCityEvent[] = [];
-  const seenTitles = new Set<string>();
 
   if (vtRes.status === 'fulfilled' && Array.isArray(vtRes.value)) {
+    const hasRomanian = vtRes.value.some(other => String(other.link ?? '').includes('/ro/'));
     for (const item of vtRes.value) {
       const link = String(item.link ?? '');
-      // Prefer Romanian entries on visit-timisoara.com
-      if (link && !link.includes('/ro/') && vtRes.value.some(other => String(other.link ?? '').includes('/ro/'))) {
-        continue;
-      }
-      const title = decodeHtmlEntities(String(item.title?.rendered ?? ''));
-      if (!title || seenTitles.has(title.toLowerCase())) continue;
-      seenTitles.add(title.toLowerCase());
+      if (link && hasRomanian && !link.includes('/ro/')) continue;
 
-      const startSec = Number(item.meta?.starting_date ?? 0);
-      const endSec = Number(item.meta?.ending_date ?? 0);
+      const title = decodeHtmlEntities(String(item.title?.rendered ?? ''));
+      if (!title) continue;
+
       const startsAt =
-        Number.isFinite(startSec) && startSec > 1_000_000_000
-          ? new Date(startSec * 1000).toISOString()
-          : item.date
-            ? new Date(item.date).toISOString()
-            : new Date().toISOString();
+        unixSecondsToIsoDate(item.meta?.starting_date) ??
+        (item.date ? new Date(item.date).toISOString() : undefined);
+      if (!startsAt) continue;
+
+      const rawEnd = unixSecondsToIsoDate(item.meta?.ending_date);
       const endsAt =
-        Number.isFinite(endSec) && endSec > 1_000_000_000
-          ? new Date(endSec * 1000).toISOString()
-          : undefined;
+        rawEnd && getBucharestDateKey(rawEnd) >= getBucharestDateKey(startsAt) ? rawEnd : undefined;
+
+      if (isCityEventExpired({ startsAt, endsAt }, now)) continue;
+      if (findDuplicateEvent(events, title, startsAt)) continue;
 
       const webLink = String(item.meta?.link_website_event || link);
       const ticketsUrl = item.meta?.link_tickets_event ? String(item.meta.link_tickets_event) : undefined;
@@ -239,7 +369,7 @@ async function fetchLiveCityEvents(): Promise<{ events: OfficialCityEvent[]; fet
         lon: venueInfo.lon,
         startsAt,
         endsAt,
-        timeLabel: item.meta?.starting_time ? String(item.meta.starting_time) : undefined,
+        timeLabel: item.meta?.starting_time ? decodeHtmlEntities(String(item.meta.starting_time)) : undefined,
         source: 'Visit Timișoara',
         officialUrl: link || webLink,
         ticketsUrl,
@@ -247,73 +377,79 @@ async function fetchLiveCityEvents(): Promise<{ events: OfficialCityEvent[]; fet
     }
   }
 
-  if (cdpRes.status === 'fulfilled' && Array.isArray(cdpRes.value)) {
-    const cdpItems = cdpRes.value.filter(item => {
-      const title = decodeHtmlEntities(String(item.title?.rendered ?? ''));
-      if (!title || seenTitles.has(title.toLowerCase())) return false;
-      seenTitles.add(title.toLowerCase());
-      return true;
-    });
+  if (cdpRes.status === 'fulfilled' && typeof cdpRes.value === 'string' && cdpRes.value) {
+    const cards = parseCdpCalendarHtml(cdpRes.value).filter(
+      card => !isCityEventExpired({ startsAt: card.startsAt, endsAt: card.endsAt }, now),
+    );
 
-    // Fetch hosted space, street address & real date in small batches of 3 to avoid rate limits
-    const cdpMetaList: Array<Awaited<ReturnType<typeof fetchCdpEventMetadata>>> = [];
-    for (let i = 0; i < cdpItems.length; i += 3) {
-      const batch = cdpItems.slice(i, i + 3);
-      const settled = await Promise.all(
-        batch.map(item => fetchCdpEventMetadata(String(item.link ?? 'https://centruldeproiecte.ro/'))),
-      );
-      cdpMetaList.push(...settled);
-    }
-
-    for (let i = 0; i < cdpItems.length; i++) {
-      const item = cdpItems[i];
-      const meta = cdpMetaList[i] ?? {};
-      const title = decodeHtmlEntities(String(item.title?.rendered ?? ''));
-      const link = String(item.link ?? 'https://centruldeproiecte.ro/').replace('/eveniment/', '/evenimente/');
-      const startsAt =
-        meta.startsAt ?? (item.date ? new Date(item.date).toISOString() : new Date().toISOString());
-
+    const resolveCardCoords = (card: ParsedCdpCard) => {
       const matchedVenue = resolveVenue(
-        `${title} ${meta.venueName ?? ''} ${meta.streetAddress ?? ''}`,
-        link,
+        `${card.title} ${card.venueRaw}`,
+        card.officialUrl,
         'centrulDeProiecte',
       );
       let lat = matchedVenue.lat;
       let lon = matchedVenue.lon;
       let venueLabel = matchedVenue.venue;
 
-      if (meta.venueName || meta.streetAddress) {
-        venueLabel = meta.streetAddress
-          ? `${meta.venueName ?? 'Centrul de Proiecte Timișoara'} (${meta.streetAddress})`
-          : meta.venueName!;
-        const isDefaultFallback = matchedVenue === defaultSourceVenues.centrulDeProiecte;
-        if (meta.streetAddress && isDefaultFallback) {
-          const geocoded = await geocodeTimisoaraStreet(meta.streetAddress);
-          if (geocoded) {
-            lat = geocoded.lat;
-            lon = geocoded.lon;
+      if (card.venueRaw) {
+        venueLabel = card.venueRaw;
+        if (matchedVenue === defaultSourceVenues.centrulDeProiecte) {
+          const cachedCoords = streetCoordsCache.get(card.venueRaw.trim().toLowerCase());
+          if (cachedCoords) {
+            lat = cachedCoords.lat;
+            lon = cachedCoords.lon;
           }
         }
       }
+      return { venueLabel, lat, lon };
+    };
 
+    const unresolvedVenues: string[] = [];
+    for (const card of cards) {
+      if (!card.venueRaw) continue;
+      const matched = resolveVenue(`${card.title} ${card.venueRaw}`, card.officialUrl, 'centrulDeProiecte');
+      if (matched === defaultSourceVenues.centrulDeProiecte && !unresolvedVenues.includes(card.venueRaw) && unresolvedVenues.length < 6) {
+        unresolvedVenues.push(card.venueRaw);
+      }
+    }
+    await Promise.all(unresolvedVenues.map(addr => geocodeTimisoaraStreet(addr)));
+
+    const cdpAdded: ParsedCdpCard[] = [];
+    for (const card of cards) {
+      const dupExisting = findDuplicateEvent(events, card.title, card.startsAt);
+      if (dupExisting) {
+        if (dupExisting.venue === defaultSourceVenues.visitTimisoara.venue && card.venueRaw) {
+          const coords = resolveCardCoords(card);
+          dupExisting.venue = coords.venueLabel;
+          dupExisting.lat = coords.lat;
+          dupExisting.lon = coords.lon;
+        }
+        continue;
+      }
+      if (findDuplicateEvent(cdpAdded, card.title, card.startsAt)) continue;
+      cdpAdded.push(card);
+
+      const { venueLabel, lat, lon } = resolveCardCoords(card);
       events.push({
-        id: `cdp-${item.id ?? events.length}`,
-        title,
-        category: classifyEventCategory(item.class_list, title),
+        id: `cdp-${getBucharestDateKey(card.startsAt)}-${cdpAdded.length - 1}`,
+        title: card.title,
+        category: classifyEventCategory([card.categoryRaw], card.title),
         venue: venueLabel,
         lat,
         lon,
-        startsAt,
-        endsAt: meta.endsAt,
+        startsAt: card.startsAt,
+        endsAt: card.endsAt,
+        timeLabel: card.timeLabel,
         source: 'Centrul de Proiecte PMT',
-        officialUrl: link,
+        officialUrl: card.officialUrl || CDP_CALENDAR_URL,
       });
     }
   }
 
   return {
-    events,
-    fetchedAt: new Date().toISOString(),
+    events: filterAndSortActiveCityEvents(events, now, 'desc'),
+    fetchedAt: now.toISOString(),
   };
 }
 
@@ -328,13 +464,23 @@ export async function cityEventsResponse(): Promise<Response> {
   const current = cache;
   try {
     const data = await current.promise;
-    return Response.json(data, {
-      headers: {
-        'Cache-Control': 'public, max-age=300',
+    const freshEvents = filterAndSortActiveCityEvents(data.events, new Date(), 'desc');
+    return Response.json(
+      {
+        events: freshEvents,
+        fetchedAt: data.fetchedAt,
       },
-    });
+      {
+        headers: {
+          'Cache-Control': 'public, max-age=300',
+        },
+      },
+    );
   } catch {
     if (cache === current) cache = undefined;
-    return Response.json({ events: [], error: 'Fluxul oficial de evenimente este indisponibil momentan.' }, { status: 502 });
+    return Response.json(
+      { events: [], error: 'Fluxul oficial de evenimente este indisponibil momentan.' },
+      { status: 502 },
+    );
   }
 }

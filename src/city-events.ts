@@ -1,21 +1,21 @@
 import { useEffect, useState } from 'react';
+import {
+  filterAndSortActiveCityEvents,
+  type OfficialCityEvent,
+} from './city-events-utils';
+
+export {
+  compareCityEventsByDate,
+  filterAndSortActiveCityEvents,
+  formatCityEventDate,
+  getBucharestDateKey,
+  getCityEventEndDateKey,
+  isCityEventExpired,
+  type CityEventSortMode,
+  type OfficialCityEvent,
+} from './city-events-utils';
 
 export const cityEventsPath = '/api/city-events';
-
-export type OfficialCityEvent = {
-  id: string;
-  title: string;
-  category: string;
-  venue: string;
-  lat: number;
-  lon: number;
-  startsAt: string;
-  endsAt?: string;
-  timeLabel?: string;
-  source: 'Visit Timișoara' | 'Centrul de Proiecte PMT';
-  officialUrl: string;
-  ticketsUrl?: string;
-};
 
 export type CityEventsState = {
   events: OfficialCityEvent[];
@@ -49,7 +49,7 @@ export function useCityEvents(enabled: boolean): CityEventsState {
         };
         if (!active) return;
         setState({
-          events: Array.isArray(data.events) ? data.events : [],
+          events: Array.isArray(data.events) ? filterAndSortActiveCityEvents(data.events) : [],
           loading: false,
           fetchedAt: data.fetchedAt,
         });

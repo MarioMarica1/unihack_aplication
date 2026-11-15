@@ -77,8 +77,13 @@ import { NewsFeedPanel } from './NewsFeedPanel';
 import type { TemporalWindow } from './NewsFeedPanel';
 import { useVeloStations } from './velo-live';
 import type { VeloStation } from './velo-live';
-import { useCityEvents } from './city-events';
-import type { OfficialCityEvent } from './city-events';
+import {
+  compareCityEventsByDate,
+  formatCityEventDate,
+  isCityEventExpired,
+  useCityEvents,
+} from './city-events';
+import type { CityEventSortMode, OfficialCityEvent } from './city-events';
 import type { ActiveLineRoute, NetworkSubFilters } from './mobility-map';
 import { AiUrbanAssistant } from './AiUrbanAssistant';
 import type { MapViewportState } from './AiUrbanAssistant';
@@ -241,7 +246,7 @@ export default function App({
   // Decoupled Community Filters (official events, citizen activities & discussions — zero reports!)
   const [communityFilter, setCommunityFilter] = useState<'all' | 'official' | 'activity' | 'discussion' | 'saved'>('all');
   const [communityEventCategory, setCommunityEventCategory] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'newest' | 'active' | 'near'>('newest');
+  const [sortBy, setSortBy] = useState<CityEventSortMode>('newest');
   const [savedEventIds, setSavedEventIds] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem('urban-conect-saved-events');
@@ -690,24 +695,33 @@ export default function App({
             p.participants.length + (state?.messages.filter(m => m.pinId === p.id).length || 0);
           return score(b) - score(a);
         }
+        if (sortBy === 'upcoming') {
+          return (a.startsAt || a.createdAt).localeCompare(b.startsAt || b.createdAt);
+        }
         return b.createdAt.localeCompare(a.createdAt);
       });
   }, [communityPostPins, communityFilter, savedIds, search, sortBy, pointA.location, state?.messages]);
 
+  // Active & Upcoming Official Events (exclude anything already finished before today)
+  const activeCityEvents = useMemo(
+    () => cityEventsFeed.events.filter(ev => !isCityEventExpired(ev)),
+    [cityEventsFeed.events],
+  );
+
   // Available Official Event Categories with live counts
   const availableCityEventCategories = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const ev of cityEventsFeed.events) {
+    for (const ev of activeCityEvents) {
       counts.set(ev.category, (counts.get(ev.category) ?? 0) + 1);
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [cityEventsFeed.events]);
+  }, [activeCityEvents]);
 
   // Filtered Official Municipal & Cultural Events for Community tab
   const visibleCityEvents = useMemo(() => {
     if (communityFilter === 'activity' || communityFilter === 'discussion') return [];
     const q = normalizeSearch(search);
-    return cityEventsFeed.events
+    return activeCityEvents
       .filter(ev => {
         if (communityFilter === 'saved' && !savedEventIds.includes(ev.id)) return false;
         if (communityEventCategory !== 'all' && ev.category !== communityEventCategory) return false;
@@ -721,9 +735,9 @@ export default function App({
             distance({ lon: b.lon, lat: b.lat }, pointA.location)
           );
         }
-        return a.startsAt.localeCompare(b.startsAt);
+        return compareCityEventsByDate(a, b, sortBy === 'upcoming' ? 'asc' : 'desc');
       });
-  }, [cityEventsFeed.events, communityFilter, communityEventCategory, savedEventIds, search, sortBy, pointA.location]);
+  }, [activeCityEvents, communityFilter, communityEventCategory, savedEventIds, search, sortBy, pointA.location]);
 
   // Filtered Citizen Reports
   const visibleCitizenReports = useMemo(() => {
@@ -889,11 +903,11 @@ export default function App({
     const pmt = (municipalFeed.allReports.length ? municipalFeed.allReports : municipalFeed.reports)
       .filter(r => normalizeSearch(`${r.number} ${r.title} ${r.category}`).includes(q))
       .slice(0, 3);
-    const events = cityEventsFeed.events
+    const events = activeCityEvents
       .filter(ev => normalizeSearch(`${ev.title} ${ev.venue} ${ev.category} ${ev.source}`).includes(q))
       .slice(0, 4);
     return { lines, places, reports, pmt, events };
-  }, [search, lineSummaries, infrastructure, citizenReportPins, municipalFeed.allReports, municipalFeed.reports, cityEventsFeed.events]);
+  }, [search, lineSummaries, infrastructure, citizenReportPins, municipalFeed.allReports, municipalFeed.reports, activeCityEvents]);
 
   async function run(action: Action, okText?: string) {
     if (!requireAuthenticatedUser()) return false;
@@ -975,7 +989,7 @@ export default function App({
       return;
     }
     if (!requireAuthenticatedUser()) return;
-    const startStr = dateLabel(ev.startsAt, { day: 'numeric', month: 'short', year: 'numeric' });
+    const startStr = formatCityEventDate(ev.startsAt, 'short');
     setForm({
       type: 'discussion',
       title: `Discuție: ${ev.title}`.slice(0, 95),
@@ -1746,7 +1760,7 @@ export default function App({
           stptAlerts={stptFeed.alerts}
           municipalReports={municipalSourceList}
           veloStations={veloFeed.stations}
-          cityEvents={cityEventsFeed.events}
+          cityEvents={activeCityEvents}
           selectedVehicle={selectedVehicle}
           selectedTransportLine={selectedTransportLine}
           selectedTransportDirection={selectedTransportDirection}
@@ -2088,11 +2102,12 @@ export default function App({
                           <Calendar size={16} />
                           <span>
                             <strong>
-                              {dateLabel(selectedCityEvent.startsAt, {
-                                day: 'numeric',
-                                month: 'long',
-                                year: 'numeric',
-                              })}
+                              {formatCityEventDate(selectedCityEvent.startsAt, 'long')}
+                              {selectedCityEvent.endsAt &&
+                              formatCityEventDate(selectedCityEvent.endsAt, 'long') !==
+                                formatCityEventDate(selectedCityEvent.startsAt, 'long')
+                                ? ` – ${formatCityEventDate(selectedCityEvent.endsAt, 'long')}`
+                                : ''}
                               {selectedCityEvent.timeLabel ? ` · ora ${selectedCityEvent.timeLabel}` : ''}
                             </strong>
                             <small>Organizator / Sursă: {selectedCityEvent.source}</small>
@@ -2797,7 +2812,7 @@ export default function App({
                         setMapFit(v => v + 1);
                       }}
                     >
-                      Toate ({communityPostPins.length + cityEventsFeed.events.length})
+                      Toate ({communityPostPins.length + activeCityEvents.length})
                     </button>
                     <button
                       type="button"
@@ -2807,7 +2822,7 @@ export default function App({
                         setMapFit(v => v + 1);
                       }}
                     >
-                      <Ticket size={13} /> Agenda Oficială ({cityEventsFeed.events.length})
+                      <Ticket size={13} /> Agenda Oficială ({activeCityEvents.length})
                     </button>
                     <button
                       type="button"
@@ -2837,7 +2852,7 @@ export default function App({
                         setMapFit(v => v + 1);
                       }}
                     >
-                      <Bookmark size={13} /> Salvate ({savedEventIds.length + communityPostPins.filter(p => savedIds.includes(p.id)).length})
+                      <Bookmark size={13} /> Salvate ({activeCityEvents.filter(ev => savedEventIds.includes(ev.id)).length + communityPostPins.filter(p => savedIds.includes(p.id)).length})
                     </button>
                   </div>
 
@@ -2854,7 +2869,7 @@ export default function App({
                               setMapFit(v => v + 1);
                             }}
                           >
-                            <option value="all">Toate categoriile ({cityEventsFeed.events.length})</option>
+                            <option value="all">Toate categoriile ({activeCityEvents.length})</option>
                             {availableCityEventCategories.map(([cat, count]) => (
                               <option key={cat} value={cat}>
                                 {cat} ({count})
@@ -2874,9 +2889,10 @@ export default function App({
                       <span>Ordonare</span>
                       <select
                         value={sortBy}
-                        onChange={e => setSortBy(e.target.value as 'newest' | 'active' | 'near')}
+                        onChange={e => setSortBy(e.target.value as CityEventSortMode)}
                       >
-                        <option value="newest">Cronologic / Cele mai noi</option>
+                        <option value="newest">Cele mai noi</option>
+                        <option value="upcoming">De azi → viitor</option>
                         <option value="near">Aproape de mine</option>
                         <option value="active">Cele mai active</option>
                       </select>
@@ -2919,10 +2935,8 @@ export default function App({
                       const linkedMsgCount = linkedDiscussion
                         ? state.messages.filter(m => m.pinId === linkedDiscussion.id).length
                         : 0;
-                      const startStr = dateLabel(ev.startsAt, { day: 'numeric', month: 'short', year: 'numeric' });
-                      const endStr = ev.endsAt
-                        ? dateLabel(ev.endsAt, { day: 'numeric', month: 'short', year: 'numeric' })
-                        : undefined;
+                      const startStr = formatCityEventDate(ev.startsAt, 'short');
+                      const endStr = ev.endsAt ? formatCityEventDate(ev.endsAt, 'short') : undefined;
                       return (
                         <article
                           key={ev.id}
@@ -3046,7 +3060,7 @@ export default function App({
                               setCommunityEventCategory('all');
                             }}
                           >
-                            Afișează toate evenimentele ({cityEventsFeed.events.length + communityPostPins.length})
+                            Afișează toate evenimentele ({activeCityEvents.length + communityPostPins.length})
                           </button>
                         )}
                         <div className="two-actions" style={{ width: '100%' }}>
